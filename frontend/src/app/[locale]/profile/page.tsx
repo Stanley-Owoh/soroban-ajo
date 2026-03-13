@@ -1,5 +1,8 @@
 'use client'
 
+// Force dynamic rendering to avoid static generation timeout
+export const dynamic = 'force-dynamic'
+
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'

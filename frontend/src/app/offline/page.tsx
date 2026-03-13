@@ -1,3 +1,6 @@
+// Force dynamic rendering to avoid static generation timeout
+export const dynamic = 'force-dynamic'
+
 import { WifiOff } from 'lucide-react'
 
 export default function OfflinePage() {
