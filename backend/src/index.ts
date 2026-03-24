@@ -4,7 +4,6 @@ import helmet from 'helmet'
 import dotenv from 'dotenv'
 import { errorHandler } from './middleware/errorHandler'
 import { requestLogger } from './middleware/requestLogger'
-// import { setupSwagger } from './middleware/swagger'
 import { logger } from './utils/logger'
 import { groupsRouter } from './routes/groups'
 import { healthRouter } from './routes/health'
@@ -19,12 +18,13 @@ import { setupSwagger } from './swagger'
 import { apiLimiter, strictLimiter } from './middleware/rateLimiter'
 import { startWorkers, stopWorkers } from './jobs/jobWorkers'
 import { startScheduler, stopScheduler } from './cron/scheduler'
-import { kycRouter } from './routes/kyc' // new KYC routes
+import { kycRouter } from './routes/kyc'
 
 dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
+
 // Middleware
 app.use(helmet())
 app.use(
@@ -41,7 +41,7 @@ app.use(express.urlencoded({ extended: true }))
 app.use('/api', apiLimiter)
 app.set('trust proxy', 1)
 
-// API Documentation
+// API Documentation - Swagger UI
 setupSwagger(app)
 
 // Routes
