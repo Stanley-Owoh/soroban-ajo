@@ -136,4 +136,13 @@ pub enum AjoError {
 
     /// Insurance pool for token not found.
     PoolNotFound = 44,
+
+    /// Invalid or unsupported payout ordering strategy.
+    InvalidStrategy = 45,
+
+    /// Voting is not open for this group's payout strategy.
+    VotingNotOpen = 46,
+
+    /// No eligible members remain for payout selection (all have been paid).
+    NoEligibleMembers = 47,
 }

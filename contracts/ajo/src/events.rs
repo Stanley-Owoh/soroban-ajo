@@ -139,3 +139,21 @@ pub fn emit_emergency_refund(
     let topics = (symbol_short!("emrefund"), group_id);
     env.events().publish(topics, (admin, total_refunded));
 }
+
+/// Emit an event when a member votes for the next payout recipient
+pub fn emit_payout_vote(env: &Env, group_id: u64, voter: &Address, nominee: &Address, cycle: u32) {
+    let topics = (symbol_short!("pvote"), group_id, cycle);
+    env.events().publish(topics, (voter, nominee));
+}
+
+/// Emit an event when the payout recipient for a cycle is determined
+pub fn emit_payout_order_determined(
+    env: &Env,
+    group_id: u64,
+    cycle: u32,
+    recipient: &Address,
+    strategy: u32,
+) {
+    let topics = (symbol_short!("porder"), group_id, cycle);
+    env.events().publish(topics, (recipient, strategy));
+}

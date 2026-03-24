@@ -567,3 +567,65 @@ pub fn get_insurance_claim(env: &Env, claim_id: u64) -> Option<crate::types::Ins
     let key = (symbol_short!("INSCLAIM"), claim_id);
     env.storage().persistent().get(&key)
 }
+
+// ── Payout-ordering helpers ───────────────────────────────────────────────────
+
+/// Returns `true` if the given member has already received their payout for a group.
+///
+/// This is the read-side counterpart of [`mark_payout_received`].
+pub fn has_received_payout(env: &Env, group_id: u64, member: &Address) -> bool {
+    let key = (symbol_short!("PAYOUT"), group_id, member);
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Stores a payout vote cast by `voter` for `nominee` in `cycle`.
+///
+/// Keyed per voter so each member can cast at most one vote per cycle.
+pub fn store_payout_vote(
+    env: &Env,
+    group_id: u64,
+    cycle: u32,
+    voter: &Address,
+    vote: &crate::types::PayoutVote,
+) {
+    let key = (symbol_short!("PVOTE"), group_id, cycle, voter);
+    env.storage().persistent().set(&key, vote);
+}
+
+/// Retrieves the payout vote cast by `voter` for `cycle`, if any.
+pub fn get_payout_vote(
+    env: &Env,
+    group_id: u64,
+    cycle: u32,
+    voter: &Address,
+) -> Option<crate::types::PayoutVote> {
+    let key = (symbol_short!("PVOTE"), group_id, cycle, voter);
+    env.storage().persistent().get(&key)
+}
+
+/// Returns `true` if `voter` has already submitted a payout vote for `cycle`.
+pub fn has_voted_for_payout(env: &Env, group_id: u64, cycle: u32, voter: &Address) -> bool {
+    let key = (symbol_short!("PVOTE"), group_id, cycle, voter);
+    env.storage().persistent().has(&key)
+}
+
+/// Persists the determined [`PayoutOrder`](crate::types::PayoutOrder) for a cycle.
+pub fn store_payout_order(
+    env: &Env,
+    group_id: u64,
+    cycle: u32,
+    order: &crate::types::PayoutOrder,
+) {
+    let key = (symbol_short!("PORDER"), group_id, cycle);
+    env.storage().persistent().set(&key, order);
+}
+
+/// Retrieves the committed payout order for a cycle, if one has been recorded.
+pub fn get_payout_order(
+    env: &Env,
+    group_id: u64,
+    cycle: u32,
+) -> Option<crate::types::PayoutOrder> {
+    let key = (symbol_short!("PORDER"), group_id, cycle);
+    env.storage().persistent().get(&key)
+}

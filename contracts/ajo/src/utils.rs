@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::Group;
+use crate::types::{Group, PayoutOrder, PayoutOrderingStrategy};
+use crate::errors::AjoError;
 
 /// Returns `true` if `address` appears in the group's `members` list.
 ///
@@ -161,4 +162,153 @@ pub fn is_within_grace_period(group: &crate::types::Group, current_time: u64) ->
     let cycle_end = group.cycle_start_time + group.cycle_duration;
     let grace_end = get_grace_period_end(group);
     current_time > cycle_end && current_time <= grace_end
+}
+
+// ── Dynamic payout ordering ───────────────────────────────────────────────────
+
+/// Determines and records the next payout recipient according to the group's
+/// [`PayoutOrderingStrategy`].
+///
+/// For [`Sequential`](PayoutOrderingStrategy::Sequential) this reproduces the
+/// original join-order behaviour using `group.payout_index` directly.
+/// For all other strategies it queries eligible members (those who have not yet
+/// received a payout) and applies the relevant selection algorithm.
+///
+/// The result is committed to persistent storage as a [`PayoutOrder`] and
+/// returned so the caller can execute the token transfer immediately.
+///
+/// # Errors
+/// * [`AjoError::NoEligibleMembers`] — all members have already been paid, or
+///   the internal members list is empty.
+/// * [`AjoError::NoMembers`] — used only for Sequential when `payout_index`
+///   points beyond the members list (should never happen in practice).
+pub fn determine_next_recipient(env: &Env, group: &Group) -> Result<Address, AjoError> {
+    let recipient = preview_next_recipient(env, group)?;
+
+    // Persist the determined order for audit / transparency
+    let order = PayoutOrder {
+        group_id: group.id,
+        cycle: group.current_cycle,
+        recipient: recipient.clone(),
+        selection_method: group.payout_strategy,
+        determined_at: get_current_timestamp(env),
+    };
+    crate::storage::store_payout_order(env, group.id, group.current_cycle, &order);
+
+    Ok(recipient)
+}
+
+/// Computes the next recipient using the group's payout strategy without
+/// writing any storage side effects.
+pub fn preview_next_recipient(env: &Env, group: &Group) -> Result<Address, AjoError> {
+    match group.payout_strategy {
+        PayoutOrderingStrategy::Sequential => select_sequential(group),
+        PayoutOrderingStrategy::Random => select_random(env, group),
+        PayoutOrderingStrategy::VotingBased | PayoutOrderingStrategy::NeedBased => {
+            select_by_votes(env, group)
+        }
+        PayoutOrderingStrategy::ContributionBased => select_by_contribution(env, group),
+    }
+}
+
+/// Selects the next recipient by join order (current `payout_index`).
+fn select_sequential(group: &Group) -> Result<Address, AjoError> {
+    group
+        .members
+        .get(group.payout_index)
+        .ok_or(AjoError::NoMembers)
+}
+
+/// Selects a random eligible member using ledger sequence and timestamp as
+/// entropy.  This is *verifiable* but not unpredictable by validators —
+/// acceptable for informal savings groups.
+///
+/// Entropy is mixed with a 64-bit multiplicative hash constant to improve
+/// distribution when the raw seed values are small.
+fn select_random(env: &Env, group: &Group) -> Result<Address, AjoError> {
+    let eligible = get_eligible_members(env, group)?;
+    let len = eligible.len() as u64;
+
+    // Combine ledger sequence and timestamp, then mix bits
+    let raw = (env.ledger().sequence() as u64)
+        .wrapping_add(env.ledger().timestamp())
+        .wrapping_mul(0x9e3779b97f4a7c15_u64); // Fibonacci-hashing constant
+    let index = (raw % len) as u32;
+
+    eligible.get(index).ok_or(AjoError::NoEligibleMembers)
+}
+
+/// Selects the eligible member who received the most votes this cycle.
+/// In the event of a tie the candidate who appears first in `group.members`
+/// wins (deterministic tiebreaker).  If no votes have been cast the
+/// function falls back to the first eligible member in join order so that a
+/// payout can always be executed.
+fn select_by_votes(env: &Env, group: &Group) -> Result<Address, AjoError> {
+    let eligible = get_eligible_members(env, group)?;
+
+    let mut best: Option<Address> = None;
+    let mut best_count: u32 = 0;
+
+    // Iterate over eligible candidates and count votes in O(n²).
+    // Acceptable for groups capped at 100 members.
+    for candidate in eligible.iter() {
+        let mut count: u32 = 0;
+        for voter in group.members.iter() {
+            if let Some(vote) =
+                crate::storage::get_payout_vote(env, group.id, group.current_cycle, &voter)
+            {
+                if vote.nominee == candidate {
+                    count += 1;
+                }
+            }
+        }
+        // Strict greater-than preserves first-encountered candidate on ties.
+        if count > best_count {
+            best_count = count;
+            best = Some(candidate);
+        }
+    }
+
+    // Fall back to first eligible member when nobody has voted yet.
+    best.or_else(|| eligible.get(0)).ok_or(AjoError::NoEligibleMembers)
+}
+
+/// Selects the eligible member with the highest reliability score
+/// (fewest late payments).  In the event of a tie the member who appears
+/// first in `group.members` wins.
+fn select_by_contribution(env: &Env, group: &Group) -> Result<Address, AjoError> {
+    let eligible = get_eligible_members(env, group)?;
+
+    let mut best: Option<Address> = None;
+    let mut best_score: u32 = 0;
+
+    for member in eligible.iter() {
+        let score = crate::storage::get_member_penalty(env, group.id, &member)
+            .map(|r| r.reliability_score)
+            .unwrap_or(100_u32); // 100 = perfect — no penalty record yet
+
+        // Strict greater-than: first member wins ties (preserves join-order fairness).
+        if score > best_score || best.is_none() {
+            best_score = score;
+            best = Some(member);
+        }
+    }
+
+    best.ok_or(AjoError::NoEligibleMembers)
+}
+
+/// Returns the subset of group members who have **not** yet received a payout.
+///
+/// Preserves the original join order of `group.members`.
+fn get_eligible_members(env: &Env, group: &Group) -> Result<Vec<Address>, AjoError> {
+    let mut eligible = Vec::new(env);
+    for member in group.members.iter() {
+        if !crate::storage::has_received_payout(env, group.id, &member) {
+            eligible.push_back(member);
+        }
+    }
+    if eligible.is_empty() {
+        return Err(AjoError::NoEligibleMembers);
+    }
+    Ok(eligible)
 }

@@ -4,7 +4,7 @@ use crate::errors::AjoError;
 use crate::events;
 use crate::pausable;
 use crate::storage;
-use crate::types::{Group, GroupMetadata, GroupStatus};
+use crate::types::{Group, GroupMetadata, GroupStatus, PayoutOrderingStrategy};
 use crate::utils;
 
 /// The main Ajo contract
@@ -188,6 +188,7 @@ impl AjoContract {
                 rate_bps: insurance_rate_bps,
                 is_enabled: insurance_rate_bps > 0,
             },
+            payout_strategy: PayoutOrderingStrategy::Sequential,
         };
 
         // Store group
@@ -529,11 +530,8 @@ impl AjoContract {
             return Err(AjoError::OutsideCycleWindow);
         }
 
-        // Get payout recipient
-        let payout_recipient = group
-            .members
-            .get(group.payout_index)
-            .ok_or(AjoError::NoMembers)?;
+        // Get payout recipient using the group's ordering strategy
+        let payout_recipient = utils::determine_next_recipient(&env, &group)?;
 
         // Calculate payout amounts: base payout + collected penalties for this cycle
         let base_payout = group.contribution_amount * (member_count as i128);
@@ -581,6 +579,15 @@ impl AjoContract {
             &payout_recipient,
             current_cycle,
             payout_amount,
+        );
+
+        // Record the ordering decision for transparency
+        events::emit_payout_order_determined(
+            &env,
+            group_id_cached,
+            current_cycle,
+            &payout_recipient,
+            group.payout_strategy as u32,
         );
 
         // Advance payout index
@@ -676,17 +683,15 @@ impl AjoContract {
             }
         }
 
-        // Determine next recipient
+        // Determine next recipient according to the configured strategy without
+        // committing payout-order storage from a read-only status query.
         let (has_next_recipient, next_recipient) = if group.is_complete {
-            // Use placeholder (creator) when complete
             (false, group.creator.clone())
         } else {
-            // Get the member at payout_index
-            let recipient = group
-                .members
-                .get(group.payout_index)
-                .unwrap_or_else(|| group.creator.clone());
-            (true, recipient)
+            match utils::preview_next_recipient(&env, &group) {
+                Ok(recipient) => (true, recipient),
+                Err(_) => (false, group.creator.clone()),
+            }
         };
 
         // Build and return status
@@ -1378,5 +1383,149 @@ impl AjoContract {
     pub fn get_group_risk_rating(env: Env, group_id: u64) -> Result<u32, AjoError> {
         let group = storage::get_group(&env, group_id).ok_or(AjoError::GroupNotFound)?;
         Ok(crate::insurance::get_group_risk_rating(&env, &group))
+    }
+
+    // ── Dynamic payout ordering ───────────────────────────────────────────────
+
+    /// Create a new Ajo group with an explicit payout ordering strategy.
+    ///
+    /// Identical to [`create_group`] except the caller chooses one of the five
+    /// [`PayoutOrderingStrategy`] variants.  For `Sequential` behaviour,
+    /// [`create_group`] is preferred; this function targets groups that want
+    /// `Random`, `VotingBased`, `ContributionBased`, or `NeedBased` ordering.
+    pub fn create_group_with_ordering(
+        env: Env,
+        creator: Address,
+        token_address: Address,
+        contribution_amount: i128,
+        cycle_duration: u64,
+        max_members: u32,
+        grace_period: u64,
+        penalty_rate: u32,
+        insurance_rate_bps: u32,
+        payout_strategy: PayoutOrderingStrategy,
+    ) -> Result<u64, AjoError> {
+        utils::validate_group_params(contribution_amount, cycle_duration, max_members)?;
+        utils::validate_penalty_params(grace_period, penalty_rate)?;
+        pausable::ensure_not_paused(&env)?;
+        creator.require_auth();
+
+        let group_id = storage::get_next_group_id(&env);
+        let mut members = Vec::new(&env);
+        members.push_back(creator.clone());
+        let now = utils::get_current_timestamp(&env);
+
+        let group = Group {
+            id: group_id,
+            creator: creator.clone(),
+            token_address,
+            contribution_amount,
+            cycle_duration,
+            max_members,
+            members,
+            current_cycle: 1,
+            payout_index: 0,
+            created_at: now,
+            cycle_start_time: now,
+            is_complete: false,
+            grace_period,
+            penalty_rate,
+            state: crate::types::GroupState::Active,
+            insurance_config: crate::types::InsuranceConfig {
+                rate_bps: insurance_rate_bps,
+                is_enabled: insurance_rate_bps > 0,
+            },
+            payout_strategy,
+        };
+
+        storage::store_group(&env, group_id, &group);
+        events::emit_group_created(&env, group_id, &creator, contribution_amount, max_members);
+        Ok(group_id)
+    }
+
+    /// Cast a vote for the next payout recipient.
+    ///
+    /// Only callable for groups whose strategy is [`PayoutOrderingStrategy::VotingBased`]
+    /// or [`PayoutOrderingStrategy::NeedBased`].  Each member may vote once per cycle;
+    /// calling again replaces the existing vote (last-vote-wins semantics).
+    ///
+    /// # Arguments
+    /// * `voter`    - The member casting the vote (must authenticate).
+    /// * `group_id` - The group the vote applies to.
+    /// * `nominee`  - The member being nominated to receive the next payout.
+    ///
+    /// # Errors
+    /// * `GroupNotFound`         — group does not exist.
+    /// * `VotingNotOpen`         — strategy is not voting-based.
+    /// * `NotMember`             — voter or nominee is not a group member.
+    /// * `AlreadyReceivedPayout` — nominee has already been paid.
+    /// * `GroupComplete`         — all payouts have been distributed.
+    /// * `GroupCancelled`        — group was cancelled.
+    pub fn vote_for_next_recipient(
+        env: Env,
+        voter: Address,
+        group_id: u64,
+        nominee: Address,
+    ) -> Result<(), AjoError> {
+        pausable::ensure_not_paused(&env)?;
+        voter.require_auth();
+
+        let group = storage::get_group(&env, group_id).ok_or(AjoError::GroupNotFound)?;
+
+        // Guard: strategy must support voting
+        if group.payout_strategy != PayoutOrderingStrategy::VotingBased
+            && group.payout_strategy != PayoutOrderingStrategy::NeedBased
+        {
+            return Err(AjoError::VotingNotOpen);
+        }
+
+        // Guard: group must be active
+        if group.is_complete {
+            return Err(AjoError::GroupComplete);
+        }
+        if group.state == crate::types::GroupState::Cancelled {
+            return Err(AjoError::GroupCancelled);
+        }
+
+        // Guard: both voter and nominee must be members
+        if !utils::is_member(&group.members, &voter) {
+            return Err(AjoError::NotMember);
+        }
+        if !utils::is_member(&group.members, &nominee) {
+            return Err(AjoError::NotMember);
+        }
+
+        // Guard: nominee must not have already received their payout
+        if storage::has_received_payout(&env, group_id, &nominee) {
+            return Err(AjoError::AlreadyReceivedPayout);
+        }
+
+        let vote = crate::types::PayoutVote {
+            group_id,
+            cycle: group.current_cycle,
+            voter: voter.clone(),
+            nominee: nominee.clone(),
+            timestamp: utils::get_current_timestamp(&env),
+        };
+
+        storage::store_payout_vote(&env, group_id, group.current_cycle, &voter, &vote);
+        events::emit_payout_vote(&env, group_id, &voter, &nominee, group.current_cycle);
+
+        Ok(())
+    }
+
+    /// Get the committed payout order recorded for a specific cycle.
+    ///
+    /// Returns the [`PayoutOrder`](crate::types::PayoutOrder) written by
+    /// `execute_payout` for audit and history purposes.
+    ///
+    /// # Errors
+    /// * `GroupNotFound` — no payout order has been recorded for this cycle yet.
+    pub fn get_payout_order(
+        env: Env,
+        group_id: u64,
+        cycle: u32,
+    ) -> Result<crate::types::PayoutOrder, AjoError> {
+        storage::get_payout_order(&env, group_id, cycle).ok_or(AjoError::GroupNotFound)
     }
 }

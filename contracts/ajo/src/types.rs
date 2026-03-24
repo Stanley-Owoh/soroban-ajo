@@ -1,5 +1,54 @@
 use soroban_sdk::{contracttype, Address, Vec};
 
+/// Strategy for determining payout order in a group.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PayoutOrderingStrategy {
+    /// Members receive payouts in the order they joined (default).
+    Sequential = 0,
+    /// Verifiable random selection using ledger sequence and timestamp as entropy.
+    Random = 1,
+    /// Members vote each cycle; the nominee with the most votes receives payout.
+    VotingBased = 2,
+    /// Member with the best on-time contribution history is selected.
+    ContributionBased = 3,
+    /// Members vote on declared need; most-voted member receives payout.
+    NeedBased = 4,
+}
+
+/// A single vote cast for the next payout recipient.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayoutVote {
+    /// The group this vote belongs to.
+    pub group_id: u64,
+    /// The cycle number this vote applies to.
+    pub cycle: u32,
+    /// Address of the member casting the vote.
+    pub voter: Address,
+    /// Address nominated to receive the next payout.
+    pub nominee: Address,
+    /// Unix timestamp when the vote was cast.
+    pub timestamp: u64,
+}
+
+/// Records the determined payout order for a specific cycle.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayoutOrder {
+    /// The group this payout order belongs to.
+    pub group_id: u64,
+    /// The cycle number this order applies to.
+    pub cycle: u32,
+    /// The address that will receive the payout.
+    pub recipient: Address,
+    /// The strategy used to select this recipient.
+    pub selection_method: PayoutOrderingStrategy,
+    /// Unix timestamp when the order was determined.
+    pub determined_at: u64,
+}
+
 /// State of a group in its lifecycle.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -89,6 +138,10 @@ pub struct Group {
 
     /// Insurance configuration for the group.
     pub insurance_config: InsuranceConfig,
+
+    /// Strategy used to determine payout order each cycle.
+    /// Defaults to `Sequential` (join order) when created via `create_group`.
+    pub payout_strategy: PayoutOrderingStrategy,
 }
 
 /// Comprehensive snapshot of a group's current state.
