@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { faqs, faqCategories } from '@/data/faqs';
 
 export default function HelpPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [expandedFaq, setExpandedFaq] = useState<string | null>(null);
+  const t = useTranslations('help');
 
   const filteredFaqs = faqs.filter((faq) => {
     const matchesSearch =
@@ -28,9 +30,9 @@ export default function HelpPage() {
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-16">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h1 className="text-4xl font-bold mb-4">Help Center</h1>
+          <h1 className="text-4xl font-bold mb-4">{t('pageTitle')}</h1>
           <p className="text-xl text-blue-100 mb-8">
-            Find answers to common questions about Ajo
+            {t('pageSubtitle')}
           </p>
 
           {/* Search Bar */}
@@ -38,7 +40,7 @@ export default function HelpPage() {
             <div className="relative">
               <input
                 type="text"
-                placeholder="Search for help..."
+                placeholder={t('searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full px-6 py-4 rounded-lg text-gray-900 dark:text-white bg-white dark:bg-gray-800 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -66,7 +68,7 @@ export default function HelpPage() {
         {/* Video Tutorials */}
         <div className="mb-12">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-            Video Tutorials
+            {t('videoTutorials')}
           </h2>
           <div className="grid md:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
@@ -83,10 +85,10 @@ export default function HelpPage() {
               </div>
               <div className="p-4">
                 <h3 className="font-semibold text-gray-900 dark:text-white">
-                  Getting Started with Ajo
+                  {t('gettingStarted')}
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Learn the basics of creating and joining groups
+                  {t('gettingStartedDesc')}
                 </p>
               </div>
             </div>
@@ -105,10 +107,10 @@ export default function HelpPage() {
               </div>
               <div className="p-4">
                 <h3 className="font-semibold text-gray-900 dark:text-white">
-                  Making Contributions
+                  {t('makingContributions')}
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  How to contribute to your savings group
+                  {t('makingContributionsDesc')}
                 </p>
               </div>
             </div>
@@ -126,7 +128,7 @@ export default function HelpPage() {
                   : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
             >
-              All
+              {t('allCategories')}
             </button>
             {faqCategories.map((category) => (
               <button
@@ -147,13 +149,13 @@ export default function HelpPage() {
         {/* FAQs */}
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-            Frequently Asked Questions
+            {t('faqTitle')}
           </h2>
 
           {filteredFaqs.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-600 dark:text-gray-400">
-                No results found. Try a different search term.
+                {t('noResults')}
               </p>
             </div>
           ) : (
@@ -210,17 +212,16 @@ export default function HelpPage() {
         {/* Contact Support */}
         <div className="mt-12 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-8 text-center">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-            Still need help?
+            {t('stillNeedHelp')}
           </h2>
           <p className="text-gray-600 dark:text-gray-300 mb-6">
-            Can&apos;t find what you&apos;re looking for? Contact our support
-            team.
+            {t('contactDescription')}
           </p>
           <a
             href="mailto:support@ajo.stellar.org"
             className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            Contact Support
+            {t('contactSupport')}
           </a>
         </div>
       </div>

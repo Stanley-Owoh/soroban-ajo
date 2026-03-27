@@ -4,6 +4,7 @@
 export const dynamic = 'force-dynamic'
 
 import React, { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -16,10 +17,10 @@ import type { ActivityItem } from '@/types/profile'
 export default function ProfilePage() {
   const router = useRouter()
   const { isAuthenticated, address, logout } = useAuth()
-  const { profile, activities, isLoading, updateProfile, savePreferences } = useProfile()
+  const { profile, activities, loading: isLoading, updateProfile, updatePreferences: savePreferences } = useProfile(address)
   const [activeSection, setActiveSection] = useState<'overview' | 'edit' | 'settings' | 'activity'>('overview')
+  const t = useTranslations('profilePage')
 
-  // Redirect to dashboard if not authenticated
   React.useEffect(() => {
     if (!isAuthenticated) {
       router.push('/dashboard')
@@ -31,22 +32,21 @@ export default function ProfilePage() {
       <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 dark:border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-slate-400">Loading profile...</p>
+          <p className="text-gray-600 dark:text-slate-400">{t('loadingProfile')}</p>
         </div>
       </div>
     )
   }
 
   const sections = [
-    { id: 'overview', label: 'Overview', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-    { id: 'edit', label: 'Edit Profile', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
-    { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
-    { id: 'activity', label: 'Activity', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { id: 'overview', label: t('overview'), icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+    { id: 'edit', label: t('editProfile'), icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
+    { id: 'settings', label: t('settings'), icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
+    { id: 'activity', label: t('activity'), icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
   ]
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
-      {/* Header */}
       <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-gray-200 dark:border-slate-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
@@ -60,8 +60,8 @@ export default function ProfilePage() {
                 </svg>
               </button>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Profile</h1>
-                <p className="text-sm text-gray-600 dark:text-slate-400">Manage your account and preferences</p>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{t('title')}</h1>
+                <p className="text-sm text-gray-600 dark:text-slate-400">{t('subtitle')}</p>
               </div>
             </div>
             <button
@@ -71,7 +71,7 @@ export default function ProfilePage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
-              Logout
+              {t('logout')}
             </button>
           </div>
         </div>
@@ -79,7 +79,6 @@ export default function ProfilePage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Sidebar */}
           <div className="lg:col-span-1">
             <nav className="bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-slate-900/50 p-4 space-y-1 border border-gray-100 dark:border-slate-700">
               {sections.map((section) => (
@@ -100,13 +99,12 @@ export default function ProfilePage() {
               ))}
             </nav>
 
-            {/* Wallet Info */}
             <div className="mt-6 bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-slate-900/50 p-6 border border-gray-100 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 mb-3">Connected Wallet</h3>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 mb-3">{t('connectedWallet')}</h3>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 dark:bg-emerald-400 rounded-full" />
-                  <span className="text-xs text-gray-600 dark:text-slate-400">Connected</span>
+                  <span className="text-xs text-gray-600 dark:text-slate-400">{t('connected')}</span>
                 </div>
                 <div className="font-mono text-xs text-gray-800 dark:text-slate-200 bg-gray-50 dark:bg-slate-700/50 p-2 rounded break-all">
                   {address}
@@ -115,50 +113,28 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="lg:col-span-3 space-y-6">
             {activeSection === 'overview' && (
               <>
                 <ProfileCard profile={profile} isLoading={isLoading} />
-                {/* KYC block */}
                 <div className="mt-6">
                   <KYCVerification />
                 </div>
-
-                {/* Quick Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <StatCard
-                    title="Active Groups"
-                    value={profile.stats.activeGroups}
-                    icon="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                    color="blue"
-                  />
-                  <StatCard
-                    title="Completed Groups"
-                    value={profile.stats.completedGroups}
-                    icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    color="green"
-                  />
-                  <StatCard
-                    title="Total Payouts"
-                    value={`$${profile.stats.totalPayouts.toFixed(2)}`}
-                    icon="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    color="purple"
-                  />
+                  <StatCard title={t('activeGroups')} value={profile.stats.activeGroups} icon="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" color="blue" />
+                  <StatCard title={t('completedGroups')} value={profile.stats.completedGroups} icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" color="green" />
+                  <StatCard title={t('totalPayouts')} value={profile.stats.totalReceived.toFixed(2)} icon="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" color="purple" />
                 </div>
               </>
             )}
-
             {activeSection === 'edit' && (
               <ProfileForm profile={profile} onSave={updateProfile} isLoading={isLoading} />
             )}
-
             {activeSection === 'settings' && (
               <SettingsPanel preferences={profile.preferences} onSave={savePreferences} isLoading={isLoading} />
             )}
-
             {activeSection === 'activity' && (
-              <ActivityHistory activities={activities} isLoading={isLoading} />
+              <ActivityHistory activities={activities} isLoading={isLoading} noActivityLabel={t('noActivityYet')} activityDescLabel={t('activityDescription')} recentActivityLabel={t('recentActivity')} />
             )}
           </div>
         </div>
@@ -167,7 +143,6 @@ export default function ProfilePage() {
   )
 }
 
-// Helper Components
 interface StatCardProps {
   title: string
   value: string | number
@@ -181,7 +156,6 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
     green: 'from-green-500 to-green-600',
     purple: 'from-purple-500 to-purple-600',
   }
-
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-slate-900/50 p-6 border border-gray-100 dark:border-slate-700">
       <div className="flex items-center gap-4">
@@ -202,9 +176,12 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color }) => {
 interface ActivityHistoryProps {
   activities: ActivityItem[]
   isLoading: boolean
+  noActivityLabel: string
+  activityDescLabel: string
+  recentActivityLabel: string
 }
 
-const ActivityHistory: React.FC<ActivityHistoryProps> = ({ activities, isLoading }) => {
+const ActivityHistory: React.FC<ActivityHistoryProps> = ({ activities, isLoading, noActivityLabel, activityDescLabel, recentActivityLabel }) => {
   if (isLoading) {
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-slate-900/50 p-8 border border-gray-100 dark:border-slate-700">
@@ -229,37 +206,36 @@ const ActivityHistory: React.FC<ActivityHistoryProps> = ({ activities, isLoading
         <svg className="w-16 h-16 text-gray-400 dark:text-slate-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">No Activity Yet</h3>
-        <p className="text-gray-600 dark:text-slate-400">Your activity history will appear here</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-slate-100 mb-2">{noActivityLabel}</h3>
+        <p className="text-gray-600 dark:text-slate-400">{activityDescLabel}</p>
       </div>
     )
   }
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg dark:shadow-slate-900/50 p-8 border border-gray-100 dark:border-slate-700">
-      <h3 className="text-xl font-bold text-gray-900 dark:text-slate-100 mb-6">Recent Activity</h3>
+      <h3 className="text-xl font-bold text-gray-900 dark:text-slate-100 mb-6">{recentActivityLabel}</h3>
       <div className="space-y-4">
         {activities.map((activity) => (
-          <ActivityItem key={activity.id} activity={activity} />
+          <ActivityItemRow key={activity.id} activity={activity} />
         ))}
       </div>
     </div>
   )
 }
 
-interface ActivityItemProps {
+interface ActivityItemRowProps {
   activity: ActivityItem
 }
 
-const ActivityItem: React.FC<ActivityItemProps> = ({ activity }) => {
-  const typeConfig = {
+const ActivityItemRow: React.FC<ActivityItemRowProps> = ({ activity }) => {
+  const typeConfig: Record<string, { icon: string; bg: string; text: string }> = {
     contribution: { icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
     payout: { icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-600 dark:text-green-400' },
     group_joined: { icon: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400' },
     group_created: { icon: 'M12 4v16m8-8H4', bg: 'bg-indigo-100 dark:bg-indigo-900/30', text: 'text-indigo-600 dark:text-indigo-400' },
   }
-
-  const config = typeConfig[activity.type]
+  const config = typeConfig[activity.type] ?? typeConfig.contribution
 
   return (
     <div className="flex items-start gap-4 p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 rounded-lg transition-colors">

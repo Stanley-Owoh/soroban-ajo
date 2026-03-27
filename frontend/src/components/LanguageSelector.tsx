@@ -1,9 +1,9 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { locales, type Locale } from '@/i18n';
+import { locales } from '@/i18n';
+import { useRouter, usePathname } from '@/navigation';
 import { useTransition } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
 
 export default function LanguageSelector() {
   const t = useTranslations('language');
@@ -15,13 +15,10 @@ export default function LanguageSelector() {
   const handleLanguageChange = (newLocale: string) => {
     if (newLocale === locale) return;
 
-    // Store preference
     localStorage.setItem('preferredLocale', newLocale);
 
-    // Update URL
     startTransition(() => {
-      const newPath = pathname.replace(`/${locale}`, `/${newLocale}`);
-      router.replace(newPath);
+      router.replace(pathname, { locale: newLocale });
     });
   };
 
