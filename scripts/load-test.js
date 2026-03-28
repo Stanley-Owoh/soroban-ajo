@@ -88,8 +88,6 @@ export const options = {
 const headers = { 'Content-Type': 'application/json' }
 
 export default function () {
-  const scenario = __ENV.SCENARIO || 'mixed'
-
   // Health check
   const healthRes = http.get(`${BASE_URL}/health`, { tags: { endpoint: 'health' } })
   check(healthRes, {

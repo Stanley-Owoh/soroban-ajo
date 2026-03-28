@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import dotenv from 'dotenv'
+import { initSentry, Sentry } from './config/sentry'
 import { errorHandler } from './middleware/errorHandler'
 import { requestLogger } from './middleware/requestLogger'
 // import { setupSwagger } from './middleware/swagger'
@@ -21,6 +22,9 @@ import { startWorkers, stopWorkers } from './jobs/jobWorkers'
 import { startScheduler, stopScheduler } from './cron/scheduler'
 
 dotenv.config()
+
+// Init Sentry before anything else
+initSentry()
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -57,6 +61,9 @@ app.use((req, res) => {
     error: 'Not found'
   })
 })
+
+// Sentry error handler (must be before custom error handler)
+app.use(Sentry.expressErrorHandler())
 
 // Error handling
 app.use(errorHandler)

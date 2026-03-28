@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
+import Script from 'next/script'
 import '../styles/globals.css'
 import { Providers } from './providers'
 import { AppLayout } from '@/components/AppLayout'
@@ -7,6 +8,8 @@ import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineIndicator } from '@/components/OfflineIndicator'
 
 const inter = Inter({ subsets: ['latin'] })
+
+const GA_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID
 
 export const metadata: Metadata = {
   title: 'Ajo - Decentralized Savings Groups',
@@ -74,6 +77,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-title" content="Ajo" />
       </head>
       <body className={inter.className}>
+        {GA_ID && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+              strategy="afterInteractive"
+            />
+            <Script id="ga-init" strategy="afterInteractive">{`
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', '${GA_ID}', { anonymize_ip: true, send_page_view: false });
+            `}</Script>
+          </>
+        )}
         <div className="pattern-overlay gradient-mesh min-h-screen">
           <Providers>
             <AppLayout>{children}</AppLayout>
