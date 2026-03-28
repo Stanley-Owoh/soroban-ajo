@@ -1,4 +1,9 @@
-// Issue #21: Build group creation form (wizard refactor)
+/**
+ * @file GroupCreationForm.tsx
+ * @description A multi-step form for creating new savings groups on the Soroban blockchain.
+ * Handles form state, real-time validation, draft persistence, and blockchain mutation.
+ */
+
 import React, { useState, useRef, useEffect } from 'react'
 import { useFormDraft } from '../hooks/useFormDraft'
 import { useCreateGroup } from '../hooks/useContractData'
@@ -27,17 +32,22 @@ interface FormErrors {
   maxMembers?: string
 }
 
+/**
+ * Properties for the GroupCreationForm component.
+ */
 interface GroupCreationFormProps {
+  /** Optional callback triggered after successful group creation */
   onSuccess?: () => void
 }
 
-const WIZARD_STEPS = [
-  { id: 1, label: 'Basics' },
-  { id: 2, label: 'Settings' },
-  { id: 3, label: 'Members' },
-  { id: 4, label: 'Preview' },
-]
-
+/**
+ * A comprehensive form component for creating a new Ajo savings group.
+ * Integrates with `useCreateGroup` for blockchain interaction and `useFormDraft`
+ * for preserving user input across sessions.
+ * 
+ * @param props - Component properties
+ * @returns {React.ReactElement} The rendered creation form
+ */
 export const GroupCreationForm: React.FC<GroupCreationFormProps> = ({ onSuccess }) => {
   const router = useRouter()
   const createGroupMutation = useCreateGroup()
@@ -85,6 +95,13 @@ export const GroupCreationForm: React.FC<GroupCreationFormProps> = ({ onSuccess 
     }
   }, [errors, submitted])
 
+  /**
+   * Validates a single form field based on predefined rules.
+   * 
+   * @param name - The field name to validate
+   * @param value - The current value of the field
+   * @returns An error message string if invalid, otherwise undefined
+   */
   const validateField = (name: string, value: any): string | undefined => {
     switch (name) {
       case 'groupName':
@@ -178,6 +195,11 @@ export const GroupCreationForm: React.FC<GroupCreationFormProps> = ({ onSuccess 
     if (validateStep(step)) setStep((s) => s + 1)
   }
 
+  /**
+   * Handles form submission, performing final validation and triggering the contract mutation.
+   * 
+   * @param e - Form submission event
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)

@@ -108,10 +108,12 @@ export class RewardConfigParser {
   });
 
   /**
-   * Parse YAML or JSON configuration string
-   * @param content - Configuration file content
-   * @returns Parsed and validated configuration
-   * @throws Error if configuration is invalid
+   * Parses a raw configuration string (YAML or JSON) into a validated RewardConfiguration object.
+   * Performs deep schema validation using Joi to ensure all required fields and formats are correct.
+   * 
+   * @param content - The raw string content of the configuration file
+   * @returns The parsed and validated RewardConfiguration object
+   * @throws {Error} If parsing fails or the configuration violates the schema
    */
   static parse(content: string): RewardConfiguration {
     let parsed: any;
@@ -138,9 +140,11 @@ export class RewardConfigParser {
   }
 
   /**
-   * Serialize configuration object to YAML string
-   * @param config - Configuration object
-   * @returns YAML string
+   * Serializes a RewardConfiguration object back into a formatted YAML string.
+   * Useful for exporting current settings or generating configuration templates.
+   * 
+   * @param config - The RewardConfiguration object to serialize
+   * @returns A string containing the YAML representation of the configuration
    */
   static serialize(config: RewardConfiguration): string {
     return yaml.dump(config, {
@@ -152,9 +156,11 @@ export class RewardConfigParser {
   }
 
   /**
-   * Validate configuration object without parsing from string
-   * @param config - Configuration object
-   * @returns Validation result
+   * Validates a configuration object against the schema and returns any validation errors.
+   * Unlike `parse`, this does not throw on failure but returns a detailed error report.
+   * 
+   * @param config - The object to validate
+   * @returns An object containing the validation status and an optional array of error messages
    */
   static validate(config: any): { valid: boolean; errors?: string[] } {
     const { error } = this.schema.validate(config, {
