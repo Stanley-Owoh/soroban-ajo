@@ -15,6 +15,8 @@ import { emailRouter } from './routes/email'
 import { jobsRouter } from './routes/jobs'
 import { setupSwagger } from './swagger'
 import { apiLimiter, strictLimiter } from './middleware/rateLimiter'
+import { performanceMiddleware } from './middleware/performance'
+import { metricsRouter } from './routes/metrics'
 import { startWorkers, stopWorkers } from './jobs/jobWorkers'
 import { startScheduler, stopScheduler } from './cron/scheduler'
 
@@ -29,6 +31,7 @@ app.use(cors({
   credentials: true
 }))
 app.use(requestLogger)
+app.use(performanceMiddleware)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use('/api', apiLimiter)
@@ -45,6 +48,7 @@ app.use('/api/webhooks', strictLimiter, webhooksRouter)
 app.use('/api/analytics', analyticsRouter)
 app.use('/api/email', emailRouter)
 app.use('/api/jobs', jobsRouter)
+app.use('/api/metrics', metricsRouter)
 
 // 404 handler
 app.use((req, res) => {
