@@ -4,8 +4,9 @@
 // #80: Performance metrics and stable references for frontend re-render optimization
 
 import { analytics, trackUserAction } from './analytics'
-import { showNotification } from '../utils/notifications'
-import { cacheService, CacheKeys, CacheTags } from './cache'
+import { showNotification } from './notifications'
+import { cacheService, CacheTags } from './cache'
+import { httpRequest, interceptorManager } from '../utils/interceptors'
 import * as SorobanClient from 'stellar-sdk'
 import { requestAccess, signTransaction, isConnected, isAllowed, setAllowed } from '@stellar/freighter-api'
 import { SorobanTransactionResponse } from '../types'
@@ -16,7 +17,46 @@ const CACHE_TTL = {
   GROUP_MEMBERS: 60 * 1000, // 1 minute - changes less often
   GROUP_LIST: 45 * 1000, // 45 seconds - moderate changes
   TRANSACTIONS: 2 * 60 * 1000, // 2 minutes - historical data
+  USER_PROFILE: 5 * 60 * 1000, // 5 minutes - user data changes infrequently
 } as const
+
+// Setup interceptors for Soroban service
+const setupInterceptors = () => {
+  // Request interceptor: Add Soroban-specific headers
+  interceptorManager.addRequestInterceptor((config) => {
+    return {
+      ...config,
+      headers: {
+        ...config.headers,
+        'X-Soroban-Client': 'ajo-frontend',
+        'X-Request-ID': `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      },
+    }
+  })
+
+  // Response interceptor: Log Soroban responses
+  interceptorManager.addResponseInterceptor((response) => {
+    if (response.config.url?.includes('soroban') || response.config.url?.includes('stellar')) {
+      console.log(`[Soroban Response] ${response.status} ${response.config.url} (${response.duration}ms)`)
+    }
+    return response
+  })
+
+  // Error interceptor: Handle Soroban-specific errors
+  interceptorManager.addErrorInterceptor((error) => {
+    if (error.config.url?.includes('soroban') || error.config.url?.includes('stellar')) {
+      analytics.trackError(error as Error, { 
+        operation: 'soroban_http', 
+        url: error.config.url, 
+        method: error.config.method 
+      }, 'medium')
+    }
+    throw error
+  })
+}
+
+// Initialize interceptors
+setupInterceptors()
 
 // Retry configuration
 const MAX_RETRIES = 3
@@ -287,6 +327,122 @@ export interface SorobanService {
 
   /** Clear all Soroban-related cache */
   clearCache: () => void
+
+  /**
+   * File an insurance claim for a defaulted contribution.
+   * 
+   * @param groupId - The group ID where the default occurred
+   * @param cycle - The cycle number where the default happened
+   * @param claimant - Address of the member filing the claim
+   * @param defaulter - Address of the member who defaulted
+   * @param amount - Amount being claimed (in stroops)
+   */
+  fileInsuranceClaim: (groupId: string, cycle: number, claimant: string, defaulter: string, amount: number) => Promise<string>
+
+  /**
+   * Process an insurance claim (approve/reject).
+   * 
+   * @param claimId - The ID of the claim to process
+   * @param approved - Whether to approve (true) or reject (false) the claim
+   */
+  processInsuranceClaim: (claimId: string, approved: boolean) => Promise<void>
+
+  /**
+   * Get details of a specific insurance claim.
+   * 
+   * @param claimId - The ID of the claim to retrieve
+   */
+  getInsuranceClaim: (claimId: string) => Promise<any>
+
+  /**
+   * Get insurance pool information for a token.
+   * 
+   * @param tokenAddress - Token contract address
+   */
+  getInsurancePool: (tokenAddress: string) => Promise<any>
+
+  /**
+   * Verify a claim automatically based on on-chain data.
+   * 
+   * @param claimId - The ID of the claim to verify
+   */
+  verifyInsuranceClaim: (claimId: string) => Promise<boolean>
+
+  /**
+   * Set metadata for a group.
+   * 
+   * @param groupId - The group ID to set metadata for
+   * @param name - Group name (max 100 characters)
+   * @param description - Group description (max 500 characters)
+   * @param rules - Group rules (max 1000 characters)
+   */
+  setGroupMetadata: (groupId: string, name: string, description: string, rules: string) => Promise<void>
+
+  /**
+   * Get metadata for a group.
+   * 
+   * @param groupId - The group ID to get metadata for
+   */
+  getGroupMetadata: (groupId: string) => Promise<any>
+
+  /**
+   * Execute multiple contract operations in a single transaction.
+   * 
+   * @param operations - Array of operations to batch
+   * @param options - Batch execution options
+   */
+  executeBatch: (operations: any[], options?: { simulateOnly?: boolean; timeout?: number }) => Promise<any>
+
+  /**
+   * Estimate gas cost for a batch of operations.
+   * 
+   * @param operations - Array of operations to estimate
+   */
+  estimateBatchGas: (operations: any[]) => Promise<{ gasEstimate: number; feeEstimate: number; operationCount: number }>
+
+  /**
+   * Make an HTTP request with interceptors.
+   * 
+   * @param config - Request configuration
+   */
+  httpRequest: <T = any>(config: {
+    url: string
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+    headers?: Record<string, string>
+    body?: any
+    timeout?: number
+    retries?: number
+    cache?: boolean
+    cacheTTL?: number
+  }) => Promise<{
+    data: T
+    status: number
+    statusText: string
+    headers: Record<string, string>
+    duration: number
+    cached: boolean
+  }>
+
+  /**
+   * Add a custom request interceptor.
+   * 
+   * @param interceptor - Request interceptor function
+   */
+  addRequestInterceptor: (interceptor: (config: any) => any | Promise<any>) => number
+
+  /**
+   * Add a custom response interceptor.
+   * 
+   * @param interceptor - Response interceptor function
+   */
+  addResponseInterceptor: (interceptor: (response: any) => any | Promise<any>) => number
+
+  /**
+   * Add a custom error interceptor.
+   * 
+   * @param interceptor - Error interceptor function
+   */
+  addErrorInterceptor: (interceptor: (error: any) => any | Promise<any>) => number
 }
 
 /** Performance mark names for DevTools / Performance API */
@@ -1153,21 +1309,752 @@ export const initializeSoroban = (): SorobanService => {
         label: 'full_clear',
       })
     },
+
+    // Insurance claim methods
+    fileInsuranceClaim: async (groupId: string, cycle: number, claimant: string, defaulter: string, amount: number) => {
+      return analytics.measureAsync('file_insurance_claim', async () => {
+        try {
+          const claimId = await withRetry(
+            async () => {
+              if (isTestEnvironment || !CONTRACT_ID) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                return `mock_claim_${Date.now()}`
+              }
+
+              if (!(await isConnected())) {
+                throw new Error("Freighter wallet is not installed.")
+              }
+              if (!(await isAllowed())) {
+                await setAllowed()
+              }
+
+              const accessResult = await requestAccess()
+              if (accessResult.error || !accessResult.address) {
+                const error: any = new Error(accessResult.error || "User public key not available.")
+                error.code = 'UNAUTHORIZED'
+                throw error
+              }
+              const publicKey = accessResult.address
+
+              const sourceAccount = await server.getAccount(publicKey)
+
+              const callArgs = [
+                SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(groupId))),
+                SorobanClient.xdr.ScVal.scvU32(cycle),
+                SorobanClient.xdr.ScVal.scvAddress(SorobanClient.Address.fromString(claimant).toScAddress()),
+                SorobanClient.xdr.ScVal.scvAddress(SorobanClient.Address.fromString(defaulter).toScAddress()),
+                SorobanClient.xdr.ScVal.scvI128(new SorobanClient.xdr.Int128(amount)),
+              ]
+
+              const contract = new SorobanClient.Contract(CONTRACT_ID)
+              const transaction = new SorobanClient.TransactionBuilder(sourceAccount, {
+                fee: "100",
+                networkPassphrase: NETWORK_PASSPHRASE,
+              })
+                .addOperation(contract.call('file_insurance_claim', ...callArgs))
+                .setTimeout(30)
+                .build()
+
+              const simulated = await server.simulateTransaction(transaction)
+
+              if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(simulated)) {
+                const error: any = new Error("Transaction simulation failed")
+                error.code = 'CONTRACT_ERROR'
+                throw error
+              }
+
+              const assembled = SorobanClient.SorobanRpc.assembleTransaction(transaction, simulated).build()
+
+              const signedXdr = await signTransaction(assembled.toXDR(), { networkPassphrase: NETWORK_PASSPHRASE })
+              const signedTransaction = SorobanClient.TransactionBuilder.fromXDR(signedXdr.signedTxXdr, NETWORK_PASSPHRASE)
+
+              const sendResult = await server.sendTransaction(signedTransaction as SorobanClient.Transaction)
+
+              if (sendResult.errorResult) {
+                throw new Error(`Transaction submitted with error: ${sendResult.errorResult.toXDR().toString("base64")}`)
+              }
+
+              let statusResponse = await server.getTransaction(sendResult.hash)
+              let attempts = 0
+              while (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS && attempts < 10) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                statusResponse = await server.getTransaction(sendResult.hash)
+                attempts++
+              }
+
+              if (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+                throw new Error("Transaction did not complete successfully in time.")
+              }
+
+              return sendResult.hash
+            },
+            'fileInsuranceClaim'
+          )
+
+          trackUserAction.insuranceClaimFiled(claimId, groupId, amount)
+          showNotification.success('Insurance claim filed successfully!')
+
+          cacheService.invalidateByTag(CacheTags.insurance)
+          return claimId
+        } catch (error) {
+          const { message: _message, severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'fileInsuranceClaim', groupId, cycle, amount }, severity)
+          showNotification.error(_message)
+          throw error
+        }
+      })
+    },
+
+    processInsuranceClaim: async (claimId: string, approved: boolean) => {
+      return analytics.measureAsync('process_insurance_claim', async () => {
+        try {
+          await withRetry(
+            async () => {
+              if (isTestEnvironment || !CONTRACT_ID) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                return
+              }
+
+              if (!(await isConnected())) {
+                throw new Error("Freighter wallet is not installed.")
+              }
+              if (!(await isAllowed())) {
+                await setAllowed()
+              }
+
+              const accessResult = await requestAccess()
+              if (accessResult.error || !accessResult.address) {
+                const error: any = new Error(accessResult.error || "User public key not available.")
+                error.code = 'UNAUTHORIZED'
+                throw error
+              }
+              const publicKey = accessResult.address
+
+              const sourceAccount = await server.getAccount(publicKey)
+
+              const callArgs = [
+                SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(claimId))),
+                SorobanClient.xdr.ScVal.scvBool(approved),
+              ]
+
+              const contract = new SorobanClient.Contract(CONTRACT_ID)
+              const transaction = new SorobanClient.TransactionBuilder(sourceAccount, {
+                fee: "100",
+                networkPassphrase: NETWORK_PASSPHRASE,
+              })
+                .addOperation(contract.call('process_insurance_claim', ...callArgs))
+                .setTimeout(30)
+                .build()
+
+              const simulated = await server.simulateTransaction(transaction)
+
+              if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(simulated)) {
+                const error: any = new Error("Transaction simulation failed")
+                error.code = 'CONTRACT_ERROR'
+                throw error
+              }
+
+              const assembled = SorobanClient.SorobanRpc.assembleTransaction(transaction, simulated).build()
+
+              const signedXdr = await signTransaction(assembled.toXDR(), { networkPassphrase: NETWORK_PASSPHRASE })
+              const signedTransaction = SorobanClient.TransactionBuilder.fromXDR(signedXdr.signedTxXdr, NETWORK_PASSPHRASE)
+
+              const sendResult = await server.sendTransaction(signedTransaction as SorobanClient.Transaction)
+
+              if (sendResult.errorResult) {
+                throw new Error(`Transaction submitted with error: ${sendResult.errorResult.toXDR().toString("base64")}`)
+              }
+
+              let statusResponse = await server.getTransaction(sendResult.hash)
+              let attempts = 0
+              while (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS && attempts < 10) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                statusResponse = await server.getTransaction(sendResult.hash)
+                attempts++
+              }
+
+              if (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+                throw new Error("Transaction did not complete successfully in time.")
+              }
+            },
+            'processInsuranceClaim'
+          )
+
+          trackUserAction.insuranceClaimProcessed(claimId, approved)
+          showNotification.success(`Claim ${approved ? 'approved' : 'rejected'} successfully!`)
+
+          cacheService.invalidateByTag(CacheTags.insurance)
+        } catch (error) {
+          const { message: _message, severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'processInsuranceClaim', claimId, approved }, severity)
+          showNotification.error(_message)
+          throw error
+        }
+      })
+    },
+
+    getInsuranceClaim: async (claimId: string) => {
+      return analytics.measureAsync('get_insurance_claim', async () => {
+        try {
+          return await cachedFetch(
+            `insurance_claim:${claimId}`,
+            async () => {
+              return await withRetry(
+                async () => {
+                  if (isTestEnvironment || !CONTRACT_ID) {
+                    await new Promise(resolve => setTimeout(resolve, 300))
+                    return {
+                      id: claimId,
+                      groupId: '1',
+                      cycle: 2,
+                      claimant: 'GABC123...',
+                      defaulter: 'GDEF456...',
+                      amount: 100000000,
+                      status: 'PENDING',
+                      createdAt: Date.now() - 3600000,
+                    }
+                  }
+
+                  if (!(await isConnected())) {
+                    throw new Error('Freighter wallet is not installed.')
+                  }
+                  if (!(await isAllowed())) {
+                    await setAllowed()
+                  }
+
+                  const accessResult = await requestAccess()
+                  if (accessResult.error || !accessResult.address) {
+                    const error: any = new Error(accessResult.error || 'User public key not available.')
+                    error.code = 'UNAUTHORIZED'
+                    throw error
+                  }
+
+                  const sourceAccount = await server.getAccount(accessResult.address)
+                  const contract = new SorobanClient.Contract(CONTRACT_ID)
+
+                  const claimTx = new SorobanClient.TransactionBuilder(sourceAccount, {
+                    fee: '100',
+                    networkPassphrase: NETWORK_PASSPHRASE,
+                  })
+                    .addOperation(
+                      contract.call(
+                        'get_insurance_claim',
+                        SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(claimId)))
+                      )
+                    )
+                    .setTimeout(30)
+                    .build()
+
+                  const claimSim = await server.simulateTransaction(claimTx)
+
+                  if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(claimSim)) {
+                    throw new Error('Failed to fetch insurance claim from contract')
+                  }
+
+                  const rawClaim = SorobanClient.scValToNative(claimSim.result!.retval)
+
+                  return {
+                    id: rawClaim.id.toString(),
+                    groupId: rawClaim.group_id.toString(),
+                    cycle: rawClaim.cycle,
+                    claimant: String(rawClaim.claimant),
+                    defaulter: String(rawClaim.defaulter),
+                    amount: Number(rawClaim.amount),
+                    status: rawClaim.status === 0 ? 'PENDING' : rawClaim.status === 1 ? 'APPROVED' : rawClaim.status === 2 ? 'REJECTED' : 'PAID',
+                    createdAt: Number(rawClaim.created_at) * 1000, // Convert from seconds to milliseconds
+                  }
+                },
+                'getInsuranceClaim'
+              )
+            },
+            {
+              ttl: CACHE_TTL.GROUP_STATUS,
+              tags: [CacheTags.insurance],
+              operationName: 'getInsuranceClaim',
+            }
+          )
+        } catch (error) {
+          const { severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'getInsuranceClaim', claimId }, severity)
+          throw error
+        }
+      })
+    },
+
+    getInsurancePool: async (tokenAddress: string) => {
+      return analytics.measureAsync('get_insurance_pool', async () => {
+        try {
+          return await cachedFetch(
+            `insurance_pool:${tokenAddress}`,
+            async () => {
+              return await withRetry(
+                async () => {
+                  if (isTestEnvironment || !CONTRACT_ID) {
+                    await new Promise(resolve => setTimeout(resolve, 300))
+                    return {
+                      balance: 5000000000, // 500 XLM in stroops
+                      totalPayouts: 1000000000, // 100 XLM in stroops
+                      pendingClaimsCount: 2,
+                    }
+                  }
+
+                  if (!(await isConnected())) {
+                    throw new Error('Freighter wallet is not installed.')
+                  }
+                  if (!(await isAllowed())) {
+                    await setAllowed()
+                  }
+
+                  const accessResult = await requestAccess()
+                  if (accessResult.error || !accessResult.address) {
+                    const error: any = new Error(accessResult.error || 'User public key not available.')
+                    error.code = 'UNAUTHORIZED'
+                    throw error
+                  }
+
+                  const sourceAccount = await server.getAccount(accessResult.address)
+                  const contract = new SorobanClient.Contract(CONTRACT_ID)
+
+                  const poolTx = new SorobanClient.TransactionBuilder(sourceAccount, {
+                    fee: '100',
+                    networkPassphrase: NETWORK_PASSPHRASE,
+                  })
+                    .addOperation(
+                      contract.call(
+                        'get_insurance_pool',
+                        SorobanClient.xdr.ScVal.scvAddress(SorobanClient.Address.fromString(tokenAddress).toScAddress())
+                      )
+                    )
+                    .setTimeout(30)
+                    .build()
+
+                  const poolSim = await server.simulateTransaction(poolTx)
+
+                  if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(poolSim)) {
+                    throw new Error('Failed to fetch insurance pool from contract')
+                  }
+
+                  const rawPool = SorobanClient.scValToNative(poolSim.result!.retval)
+
+                  return {
+                    balance: Number(rawPool.balance),
+                    totalPayouts: Number(rawPool.total_payouts),
+                    pendingClaimsCount: Number(rawPool.pending_claims_count),
+                  }
+                },
+                'getInsurancePool'
+              )
+            },
+            {
+              ttl: CACHE_TTL.GROUP_STATUS,
+              tags: [CacheTags.insurance],
+              operationName: 'getInsurancePool',
+            }
+          )
+        } catch (error) {
+          const { severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'getInsurancePool', tokenAddress }, severity)
+          throw error
+        }
+      })
+    },
+
+    verifyInsuranceClaim: async (claimId: string) => {
+      return analytics.measureAsync('verify_insurance_claim', async () => {
+        try {
+          return await withRetry(
+            async () => {
+              if (isTestEnvironment || !CONTRACT_ID) {
+                await new Promise(resolve => setTimeout(resolve, 1000))
+                return Math.random() > 0.3 // Mock verification with 70% success rate
+              }
+
+              if (!(await isConnected())) {
+                throw new Error('Freighter wallet is not installed.')
+              }
+              if (!(await isAllowed())) {
+                await setAllowed()
+              }
+
+              const accessResult = await requestAccess()
+              if (accessResult.error || !accessResult.address) {
+                const error: any = new Error(accessResult.error || 'User public key not available.')
+                error.code = 'UNAUTHORIZED'
+                throw error
+              }
+
+              const sourceAccount = await server.getAccount(accessResult.address)
+              const contract = new SorobanClient.Contract(CONTRACT_ID)
+
+              const verifyTx = new SorobanClient.TransactionBuilder(sourceAccount, {
+                fee: '100',
+                networkPassphrase: NETWORK_PASSPHRASE,
+              })
+                .addOperation(
+                  contract.call(
+                    'verify_insurance_claim',
+                    SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(claimId)))
+                  )
+                )
+                .setTimeout(30)
+                .build()
+
+              const verifySim = await server.simulateTransaction(verifyTx)
+
+              if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(verifySim)) {
+                throw new Error('Failed to verify insurance claim')
+              }
+
+              const isValid = SorobanClient.scValToNative(verifySim.result!.retval)
+              return Boolean(isValid)
+            },
+            'verifyInsuranceClaim'
+          )
+        } catch (error) {
+          const { message: _message, severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'verifyInsuranceClaim', claimId }, severity)
+          showNotification.error(_message)
+          throw error
+        }
+      })
+    },
+
+    setGroupMetadata: async (groupId: string, name: string, description: string, rules: string) => {
+      return analytics.measureAsync('set_group_metadata', async () => {
+        try {
+          await withRetry(
+            async () => {
+              // Validate metadata length limits
+              if (name.length > 100) {
+                const error: any = new Error('Group name exceeds maximum length of 100 characters')
+                error.code = 'INVALID_PARAMETERS'
+                throw error
+              }
+              if (description.length > 500) {
+                const error: any = new Error('Group description exceeds maximum length of 500 characters')
+                error.code = 'INVALID_PARAMETERS'
+                throw error
+              }
+              if (rules.length > 1000) {
+                const error: any = new Error('Group rules exceed maximum length of 1000 characters')
+                error.code = 'INVALID_PARAMETERS'
+                throw error
+              }
+
+              if (isTestEnvironment || !CONTRACT_ID) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                return
+              }
+
+              if (!(await isConnected())) {
+                throw new Error("Freighter wallet is not installed.")
+              }
+              if (!(await isAllowed())) {
+                await setAllowed()
+              }
+
+              const accessResult = await requestAccess()
+              if (accessResult.error || !accessResult.address) {
+                const error: any = new Error(accessResult.error || "User public key not available.")
+                error.code = 'UNAUTHORIZED'
+                throw error
+              }
+              const publicKey = accessResult.address
+
+              const sourceAccount = await server.getAccount(publicKey)
+
+              const callArgs = [
+                SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(groupId))),
+                SorobanClient.xdr.ScVal.scvString(name),
+                SorobanClient.xdr.ScVal.scvString(description),
+                SorobanClient.xdr.ScVal.scvString(rules),
+              ]
+
+              const contract = new SorobanClient.Contract(CONTRACT_ID)
+              const transaction = new SorobanClient.TransactionBuilder(sourceAccount, {
+                fee: "100",
+                networkPassphrase: NETWORK_PASSPHRASE,
+              })
+                .addOperation(contract.call('set_group_metadata', ...callArgs))
+                .setTimeout(30)
+                .build()
+
+              const simulated = await server.simulateTransaction(transaction)
+
+              if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(simulated)) {
+                const error: any = new Error("Transaction simulation failed")
+                error.code = 'CONTRACT_ERROR'
+                throw error
+              }
+
+              const assembled = SorobanClient.SorobanRpc.assembleTransaction(transaction, simulated).build()
+
+              const signedXdr = await signTransaction(assembled.toXDR(), { networkPassphrase: NETWORK_PASSPHRASE })
+              const signedTransaction = SorobanClient.TransactionBuilder.fromXDR(signedXdr.signedTxXdr, NETWORK_PASSPHRASE)
+
+              const sendResult = await server.sendTransaction(signedTransaction as SorobanClient.Transaction)
+
+              if (sendResult.errorResult) {
+                throw new Error(`Transaction submitted with error: ${sendResult.errorResult.toXDR().toString("base64")}`)
+              }
+
+              let statusResponse = await server.getTransaction(sendResult.hash)
+              let attempts = 0
+              while (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS && attempts < 10) {
+                await new Promise((resolve) => setTimeout(resolve, 2000))
+                statusResponse = await server.getTransaction(sendResult.hash)
+                attempts++
+              }
+
+              if (statusResponse.status !== SorobanClient.SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+                throw new Error("Transaction did not complete successfully in time.")
+              }
+            },
+            'setGroupMetadata'
+          )
+
+          trackUserAction.groupMetadataUpdated(groupId, { name, description, rules })
+          showNotification.success('Group metadata updated successfully!')
+
+          cacheService.invalidateByTag(CacheTags.group(groupId))
+        } catch (error) {
+          const { message: _message, severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'setGroupMetadata', groupId }, severity)
+          showNotification.error(_message)
+          throw error
+        }
+      })
+    },
+
+    getGroupMetadata: async (groupId: string) => {
+      return analytics.measureAsync('get_group_metadata', async () => {
+        try {
+          return await cachedFetch(
+            `group_metadata:${groupId}`,
+            async () => {
+              return await withRetry(
+                async () => {
+                  if (isTestEnvironment || !CONTRACT_ID) {
+                    await new Promise(resolve => setTimeout(resolve, 300))
+                    return {
+                      name: 'Test Group',
+                      description: 'This is a test group for development purposes.',
+                      rules: '1. Be respectful\n2. Contribute on time\n3. Follow the group guidelines',
+                      updatedAt: Date.now() - 86400000,
+                    }
+                  }
+
+                  if (!(await isConnected())) {
+                    throw new Error('Freighter wallet is not installed.')
+                  }
+                  if (!(await isAllowed())) {
+                    await setAllowed()
+                  }
+
+                  const accessResult = await requestAccess()
+                  if (accessResult.error || !accessResult.address) {
+                    const error: any = new Error(accessResult.error || 'User public key not available.')
+                    error.code = 'UNAUTHORIZED'
+                    throw error
+                  }
+
+                  const sourceAccount = await server.getAccount(accessResult.address)
+                  const contract = new SorobanClient.Contract(CONTRACT_ID)
+
+                  const metadataTx = new SorobanClient.TransactionBuilder(sourceAccount, {
+                    fee: '100',
+                    networkPassphrase: NETWORK_PASSPHRASE,
+                  })
+                    .addOperation(
+                      contract.call(
+                        'get_group_metadata',
+                        SorobanClient.xdr.ScVal.scvU64(new SorobanClient.xdr.Uint64(parseInt(groupId)))
+                      )
+                    )
+                    .setTimeout(30)
+                    .build()
+
+                  const metadataSim = await server.simulateTransaction(metadataTx)
+
+                  if (!SorobanClient.SorobanRpc.Api.isSimulationSuccess(metadataSim)) {
+                    throw new Error('Failed to fetch group metadata from contract')
+                  }
+
+                  const rawMetadata = SorobanClient.scValToNative(metadataSim.result!.retval)
+
+                  return {
+                    name: rawMetadata.name,
+                    description: rawMetadata.description,
+                    rules: rawMetadata.rules,
+                    updatedAt: Number(rawMetadata.updated_at) * 1000, // Convert from seconds to milliseconds
+                  }
+                },
+                'getGroupMetadata'
+              )
+            },
+            {
+              ttl: CACHE_TTL.GROUP_STATUS,
+              tags: [CacheTags.group(groupId)],
+              operationName: 'getGroupMetadata',
+            }
+          )
+        } catch (error) {
+          const { severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'getGroupMetadata', groupId }, severity)
+          throw error
+        }
+      })
+    },
+
+    executeBatch: async (operations: any[], options: { simulateOnly?: boolean; timeout?: number } = {}) => {
+      return analytics.measureAsync('execute_batch', async () => {
+        try {
+          // Import the transaction batcher
+          const { TransactionBatcher, createScVal } = await import('../utils/transactionBatcher')
+          
+          if (!(await isConnected())) {
+            throw new Error("Freighter wallet is not installed.")
+          }
+          if (!(await isAllowed())) {
+            await setAllowed()
+          }
+
+          const accessResult = await requestAccess()
+          if (accessResult.error || !accessResult.address) {
+            const error: any = new Error(accessResult.error || "User public key not available.")
+            error.code = 'UNAUTHORIZED'
+            throw error
+          }
+
+          const sourceAccount = await server.getAccount(accessResult.address)
+          const batcher = new TransactionBatcher(server, NETWORK_PASSPHRASE)
+
+          // Convert operations to batch format
+          const batchOperations = operations.map((op, index) => ({
+            id: op.id || `op_${index}`,
+            contractAddress: op.contractAddress || CONTRACT_ID,
+            methodName: op.methodName,
+            args: op.args.map((arg: any) => createScVal(arg)),
+            description: op.description,
+          }))
+
+          // Validate operations
+          const validation = batcher.validateBatchable(batchOperations)
+          if (!validation.valid) {
+            throw new Error(`Batch validation failed: ${validation.errors.join(', ')}`)
+          }
+
+          // Execute the batch
+          const result = await batcher.executeBatch(
+            batchOperations,
+            sourceAccount,
+            signTransaction,
+            options
+          )
+
+          if (result.success) {
+            trackUserAction.batchExecuted(result.batchId, {
+              operationCount: operations.length,
+              gasUsed: result.gasUsed,
+              simulateOnly: options.simulateOnly || false,
+            })
+            
+            if (!options.simulateOnly) {
+              showNotification.success(`Batch executed successfully! ${result.results.filter(r => r.success).length}/${result.results.length} operations completed.`)
+              
+              // Invalidate relevant caches
+              cacheService.invalidateByTag(CacheTags.groups)
+            }
+          } else {
+            showNotification.error(`Batch execution failed: ${result.error}`)
+          }
+
+          return result
+        } catch (error) {
+          const { message: _message, severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'executeBatch', operationCount: operations.length }, severity)
+          showNotification.error(_message)
+          throw error
+        }
+      })
+    },
+
+    estimateBatchGas: async (operations: any[]) => {
+      return analytics.measureAsync('estimate_batch_gas', async () => {
+        try {
+          // Import the transaction batcher
+          const { TransactionBatcher, createScVal } = await import('../utils/transactionBatcher')
+          
+          if (!(await isConnected())) {
+            throw new Error("Freighter wallet is not installed.")
+          }
+          if (!(await isAllowed())) {
+            await setAllowed()
+          }
+
+          const accessResult = await requestAccess()
+          if (accessResult.error || !accessResult.address) {
+            const error: any = new Error(accessResult.error || "User public key not available.")
+            error.code = 'UNAUTHORIZED'
+            throw error
+          }
+
+          const sourceAccount = await server.getAccount(accessResult.address)
+          const batcher = new TransactionBatcher(server, NETWORK_PASSPHRASE)
+
+          // Convert operations to batch format
+          const batchOperations = operations.map((op, index) => ({
+            id: op.id || `op_${index}`,
+            contractAddress: op.contractAddress || CONTRACT_ID,
+            methodName: op.methodName,
+            args: op.args.map((arg: any) => createScVal(arg)),
+            description: op.description,
+          }))
+
+          // Validate operations first
+          const validation = batcher.validateBatchable(batchOperations)
+          if (!validation.valid) {
+            throw new Error(`Batch validation failed: ${validation.errors.join(', ')}`)
+          }
+
+          // Estimate gas
+          const estimate = await batcher.estimateBatchGas(batchOperations, sourceAccount)
+          
+          return estimate
+        } catch (error) {
+          const { severity } = classifyError(error)
+          analytics.trackError(error as Error, { operation: 'estimateBatchGas', operationCount: operations.length }, severity)
+          throw error
+        }
+      })
+    },
+
+    httpRequest: async <T = any>(config: {
+      url: string
+      method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+      headers?: Record<string, string>
+      body?: any
+      timeout?: number
+      retries?: number
+      cache?: boolean
+      cacheTTL?: number
+    }) => {
+      return await httpRequest<T>(config)
+    },
+
+    addRequestInterceptor: (interceptor: (config: any) => any | Promise<any>) => {
+      return interceptorManager.addRequestInterceptor(interceptor)
+    },
+
+    addResponseInterceptor: (interceptor: (response: any) => any | Promise<any>) => {
+      return interceptorManager.addResponseInterceptor(interceptor)
+    },
+
+    addErrorInterceptor: (interceptor: (error: any) => any | Promise<any>) => {
+      return interceptorManager.addErrorInterceptor(interceptor)
+    },
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ADD THESE TO THE BOTTOM OF frontend/src/services/soroban.ts
-//
-// Do NOT replace your existing file — paste everything below this comment
-// at the very end of soroban.ts. The existing imports (SorobanClient, server,
-// NETWORK_PASSPHRASE, etc.) are already declared above so we reuse them here.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import * as StellarSdk from 'stellar-sdk'
-
-// ── Types exported for use in hooks and components ───────────────────────────
-
 export interface AccountBalanceInfo {
   /** Raw XLM balance string from Horizon e.g. "1234.5600000" */
   nativeBalance: string
@@ -1419,4 +2306,3 @@ export function getAddFundsUrl(publicKey: string): string {
   return IS_TESTNET
     ? `https://friendbot.stellar.org?addr=${encodeURIComponent(publicKey)}`
     : 'https://stellarx.com/markets/XLM'
-}
