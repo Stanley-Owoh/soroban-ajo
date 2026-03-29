@@ -20,6 +20,7 @@ import Onboarding from './Onboarding'
 import { ProductTour } from './tour/ProductTour'
 import { ThemeToggle } from './ThemeToggle'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { GlobalSearch } from './GlobalSearch'
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -103,6 +104,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             </Link>
 
             <div className="flex items-center gap-3">
+              <div className="hidden md:block mr-2">
+                <GlobalSearch />
+              </div>
               <ThemeToggle />
               <NotificationBell />
               <NotificationHistory />
@@ -151,6 +155,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               )
             })}
           </nav>
+        </div>
         </div>
       </header>
 
@@ -275,8 +280,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               </ul>
             </div>
           </div>
+          </div>
         </footer>
       </div>
-    </div>
+    
   )
 }

@@ -13,6 +13,7 @@ import { healthRouter } from './routes/health'
 import { webhooksRouter } from './routes/webhooks'
 import { authRouter } from './routes/auth'
 import { jobsRouter } from './routes/jobs'
+import { searchRouter } from './routes/search'
 import { setupSwagger } from './swagger'
 import { apiLimiter, strictLimiter } from './middleware/rateLimiter'
 // Import queue and job modules
@@ -68,6 +69,7 @@ app.use('/api/transactions', transactionsRouter)
 app.use('/api/refunds', refundsRouter)
 app.use('/api/webhooks', strictLimiter, webhooksRouter)
 app.use('/jobs', jobsRouter)
+app.use('/api/search', searchRouter)
 
 // Sentry error handler (must be before custom error handler)
 app.use(Sentry.expressErrorHandler())
