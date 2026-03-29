@@ -199,7 +199,7 @@ export const examples = {
     registerWebhook: {
       request: {
         url: 'https://example.com/webhook',
-        events: ['group.created', 'contribution.made', 'payout.completed'],
+        events: ['group.created', 'contribution.made', 'payout.executed', 'payout.completed'],
         secret: 'webhook_secret_key',
         headers: {
           'X-Custom-Header': 'value',

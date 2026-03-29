@@ -1,5 +1,6 @@
 import { dbService } from '../services/databaseService'
 import { notificationService } from '../services/notificationService'
+import { webhookService, WebhookEventType } from '../services/webhookService'
 import { createModuleLogger } from '../utils/logger'
 import type { ParsedContractEvent } from '../utils/eventParser'
 
@@ -23,6 +24,23 @@ export async function handleGroupCreated(event: ParsedContractEvent): Promise<vo
   })
 
   await dbService.upsertUser(creator)
+
+  await webhookService.triggerEvent(
+    WebhookEventType.GROUP_CREATED,
+    {
+      groupId,
+      creator,
+      contributionAmount: contributionAmount.toString(),
+      maxMembers,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      groupId,
+      userId: creator,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
+
   logger.info('Group created', { groupId, creator })
 }
 
@@ -44,6 +62,20 @@ export async function handleMemberJoined(event: ParsedContractEvent): Promise<vo
       groupId,
     },
     member
+  )
+
+  await webhookService.triggerEvent(
+    WebhookEventType.MEMBER_JOINED,
+    {
+      groupId,
+      memberAddress: member,
+      joinedAt: new Date().toISOString(),
+    },
+    {
+      groupId,
+      userId: member,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
   )
 
   logger.info('Member joined', { groupId, member })
@@ -80,6 +112,24 @@ export async function handleContributionMade(event: ParsedContractEvent): Promis
     groupId,
   })
 
+  await webhookService.triggerEvent(
+    WebhookEventType.CONTRIBUTION_MADE,
+    {
+      groupId,
+      contributor: member,
+      amount: amount.toString(),
+      txHash,
+      cycle,
+      contributedAt: new Date().toISOString(),
+    },
+    {
+      groupId,
+      userId: member,
+      transactionHash: txHash,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
+
   logger.info('Contribution made', { groupId, member, amount: amount.toString(), cycle })
 }
 
@@ -98,6 +148,34 @@ export async function handlePayoutExecuted(event: ParsedContractEvent): Promise<
     message: `You received a payout of ${amount} stroops.`,
     groupId,
   })
+
+  const payoutData = {
+    groupId,
+    recipient,
+    amount: amount.toString(),
+    dispatchedAt: new Date().toISOString(),
+  }
+
+  await webhookService.triggerEvent(
+    WebhookEventType.PAYOUT_EXECUTED,
+    payoutData,
+    {
+      groupId,
+      userId: recipient,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
+
+  // Backward compatibility for legacy subscriptions
+  await webhookService.triggerEvent(
+    WebhookEventType.PAYOUT_COMPLETED,
+    payoutData,
+    {
+      groupId,
+      userId: recipient,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
 
   logger.info('Payout executed', { groupId, recipient, amount: amount.toString() })
 }
@@ -121,6 +199,18 @@ export async function handleGroupCompleted(event: ParsedContractEvent): Promise<
     groupId,
   })
 
+  await webhookService.triggerEvent(
+    WebhookEventType.GROUP_COMPLETED,
+    {
+      groupId,
+      completedAt: new Date().toISOString(),
+    },
+    {
+      groupId,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
+
   logger.info('Group completed', { groupId })
 }
 
@@ -138,6 +228,19 @@ export async function handleCycleAdvanced(event: ParsedContractEvent): Promise<v
     maxMembers: 0,
     currentRound: newCycle,
   })
+
+  await webhookService.triggerEvent(
+    WebhookEventType.CYCLE_STARTED,
+    {
+      groupId,
+      cycleNumber: newCycle,
+      startedAt: new Date().toISOString(),
+    },
+    {
+      groupId,
+      network: process.env.SOROBAN_NETWORK || 'testnet',
+    }
+  )
 
   logger.info('Cycle advanced', { groupId, newCycle })
 }

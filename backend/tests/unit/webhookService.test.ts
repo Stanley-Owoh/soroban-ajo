@@ -166,9 +166,7 @@ describe('WebhookService', () => {
       const secret = 'test-secret';
       const invalidSignature = 'invalid-signature-hash';
 
-      expect(() => {
-        service.verifySignature(payload, invalidSignature, secret);
-      }).toThrow();
+      expect(service.verifySignature(payload, invalidSignature, secret)).toBe(false);
     });
   });
 

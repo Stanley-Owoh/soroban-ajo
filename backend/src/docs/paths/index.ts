@@ -288,6 +288,7 @@ export const allPaths: OpenAPIV3.PathsObject = {
                       'member.joined',
                       'contribution.made',
                       'payout.executed',
+                      'payout.completed',
                     ],
                   },
                   example: ['group.created', 'contribution.made'],

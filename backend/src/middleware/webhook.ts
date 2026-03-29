@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import * as crypto from 'crypto'
-import { webhookService, WebhookEventType } from '../services/webhookService'
+import { webhookService, WebhookEventType, WebhookPayload } from '../services/webhookService'
 import { AppError } from './errorHandler'
 import { createModuleLogger } from '../utils/logger'
 
@@ -38,7 +38,6 @@ export const webhookMiddleware = {
       next()
     } catch (error) {
       logger.error('Webhook trigger failed', { error, event: WebhookEventType.GROUP_CREATED })
-      // Don't fail the request if webhook fails
       next()
     }
   },
@@ -112,16 +111,30 @@ export const webhookMiddleware = {
     try {
       const payoutData = res.locals.payoutData
 
+      const payload = {
+        groupId: payoutData.groupId,
+        recipient: payoutData.recipient,
+        amount: payoutData.amount,
+        cycle: payoutData.cycle,
+        transactionHash: payoutData.transactionHash,
+        completedAt: new Date().toISOString(),
+      }
+
       await webhookService.triggerEvent(
-        WebhookEventType.PAYOUT_COMPLETED,
+        WebhookEventType.PAYOUT_EXECUTED,
+        payload,
         {
           groupId: payoutData.groupId,
-          recipient: payoutData.recipient,
-          amount: payoutData.amount,
-          cycle: payoutData.cycle,
+          userId: payoutData.recipient,
           transactionHash: payoutData.transactionHash,
-          completedAt: new Date().toISOString(),
-        },
+          network: process.env.SOROBAN_NETWORK || 'testnet',
+        }
+      )
+
+      // Backward compatibility for existing subscribers
+      await webhookService.triggerEvent(
+        WebhookEventType.PAYOUT_COMPLETED,
+        payload,
         {
           groupId: payoutData.groupId,
           userId: payoutData.recipient,
@@ -259,7 +272,7 @@ export const verifyWebhookSignature = (req: Request, _res: Response, next: NextF
  */
 export const webhookController = {
   /**
-   * List all webhook endpoints
+   * List all webhook endpoints (secret is never exposed)
    */
   listEndpoints: (_req: Request, res: Response) => {
     const endpoints = webhookService.getEndpoints()
@@ -270,7 +283,6 @@ export const webhookController = {
         url: e.url,
         events: e.events,
         enabled: e.enabled,
-        // Don't expose secret
       })),
     })
   },
@@ -278,7 +290,7 @@ export const webhookController = {
   /**
    * Register a new webhook endpoint
    */
-  registerEndpoint: (req: Request, res: Response, next: NextFunction) => {
+  registerEndpoint: async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { url, events, secret, headers } = req.body
 
@@ -286,7 +298,7 @@ export const webhookController = {
         throw new AppError('Invalid webhook configuration', 'BAD_REQUEST', 400)
       }
 
-      const id = webhookService.registerEndpoint({
+      const id = await webhookService.registerEndpointAsync({
         url,
         events,
         secret: secret || crypto.randomBytes(32).toString('hex'),
@@ -306,12 +318,12 @@ export const webhookController = {
   /**
    * Update webhook endpoint
    */
-  updateEndpoint: (req: Request, res: Response, next: NextFunction) => {
+  updateEndpoint: async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params
       const updates = req.body
 
-      const success = webhookService.updateEndpoint(id, updates)
+      const success = await webhookService.updateEndpointAsync(id, updates)
 
       if (!success) {
         throw new AppError('Webhook endpoint not found', 'NOT_FOUND', 404)
@@ -329,11 +341,11 @@ export const webhookController = {
   /**
    * Delete webhook endpoint
    */
-  deleteEndpoint: (req: Request, res: Response, next: NextFunction) => {
+  deleteEndpoint: async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params
 
-      const success = webhookService.unregisterEndpoint(id)
+      const success = await webhookService.unregisterEndpointAsync(id)
 
       if (!success) {
         throw new AppError('Webhook endpoint not found', 'NOT_FOUND', 404)
@@ -360,7 +372,7 @@ export const webhookController = {
   },
 
   /**
-   * Test webhook endpoint
+   * Test a specific webhook endpoint by delivering a test payload only to it
    */
   testEndpoint: async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -371,22 +383,27 @@ export const webhookController = {
         throw new AppError('Webhook endpoint not found', 'NOT_FOUND', 404)
       }
 
-      // Trigger a test event
-      await webhookService.triggerEvent(
-        WebhookEventType.GROUP_CREATED,
-        {
+      const testPayload: WebhookPayload = {
+        id: crypto.randomUUID(),
+        event: WebhookEventType.GROUP_CREATED,
+        timestamp: new Date().toISOString(),
+        data: {
           test: true,
           message: 'This is a test webhook',
           timestamp: new Date().toISOString(),
         },
-        {
+        metadata: {
           network: 'testnet',
-        }
-      )
+        },
+      }
+
+      // Deliver only to this specific endpoint, not the whole queue
+      const result = await webhookService.deliverToEndpoint(endpoint, testPayload)
 
       res.json({
         success: true,
         message: 'Test webhook sent',
+        result,
       })
     } catch (error) {
       next(error)

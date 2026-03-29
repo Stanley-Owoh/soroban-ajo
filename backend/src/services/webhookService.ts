@@ -1,4 +1,5 @@
 import * as crypto from 'crypto'
+import { prisma } from '../config/database'
 import { createModuleLogger } from '../utils/logger'
 
 const logger = createModuleLogger('WebhookService')
@@ -15,6 +16,7 @@ export enum WebhookEventType {
   CONTRIBUTION_MADE = 'contribution.made',
   CONTRIBUTION_FAILED = 'contribution.failed',
   PAYOUT_COMPLETED = 'payout.completed',
+  PAYOUT_EXECUTED = 'payout.executed',
   PAYOUT_FAILED = 'payout.failed',
   CYCLE_STARTED = 'cycle.started',
   CYCLE_ENDED = 'cycle.ended',
@@ -64,17 +66,20 @@ export interface WebhookDeliveryResult {
 }
 
 /**
- * Webhook Service
- * Handles webhook registration, event dispatching, and delivery
+ * WebhookService
+ * Handles webhook registration (persisted to DB), event dispatching, and delivery.
  */
 export class WebhookService {
+  // In-memory cache of endpoints loaded from DB
   private endpoints: Map<string, WebhookEndpoint> = new Map()
   private deliveryQueue: WebhookPayload[] = []
   private isProcessing = false
 
   constructor() {
-    // Load webhook endpoints from environment or database
-    this.loadEndpoints()
+    // Load persisted endpoints asynchronously; errors are non-fatal
+    this.loadEndpoints().catch((err) =>
+      logger.warn('Failed to load webhook endpoints from DB on startup', { err })
+    )
   }
 
   /**
@@ -88,43 +93,72 @@ export class WebhookService {
     const webhookEndpoint: WebhookEndpoint = {
       id,
       ...endpoint,
-      retryConfig: endpoint.retryConfig || {
-        maxRetries: 3,
-        retryDelay: 1000,
-      },
+      retryConfig: endpoint.retryConfig || { maxRetries: 3, retryDelay: 1000 },
     }
-
     this.endpoints.set(id, webhookEndpoint)
-    logger.info('Webhook endpoint registered', {
-      endpointId: id,
-      url: endpoint.url,
-      events: endpoint.events,
-      enabled: endpoint.enabled,
-    })
+    logger.info('Webhook endpoint registered (in-memory)', { endpointId: id, url: endpoint.url })
     return id
   }
 
   /**
-   * Unregister a webhook endpoint
+   * Unregister a webhook endpoint (removes from DB and cache)
    */
-  unregisterEndpoint(id: string): boolean {
-    const deleted = this.endpoints.delete(id)
-    logger.info('Webhook endpoint unregistered', { endpointId: id, deleted })
-    return deleted
+  async unregisterEndpointAsync(id: string): Promise<boolean> {
+    try {
+      await prisma.webhookSubscription.delete({ where: { id } })
+    } catch {
+      // Record may not exist in DB (e.g. env-loaded endpoint)
+    }
+    return this.endpoints.delete(id)
   }
 
   /**
-   * Update webhook endpoint configuration
+   * Unregister a webhook endpoint (in-memory only)
+   */
+  unregisterEndpoint(id: string): boolean {
+    return this.endpoints.delete(id)
+  }
+
+  /**
+   * Update webhook endpoint configuration (persisted to DB)
+   */
+  async updateEndpointAsync(id: string, updates: Partial<WebhookEndpoint>): Promise<boolean> {
+    const endpoint = this.endpoints.get(id)
+    if (!endpoint) return false
+
+    const merged = { ...endpoint, ...updates }
+    this.endpoints.set(id, merged)
+
+    try {
+      await prisma.webhookSubscription.update({
+        where: { id },
+        data: {
+          ...(updates.url !== undefined && { url: updates.url }),
+          ...(updates.secret !== undefined && { secret: updates.secret }),
+          ...(updates.events !== undefined && { events: JSON.stringify(updates.events) }),
+          ...(updates.enabled !== undefined && { enabled: updates.enabled }),
+          ...(updates.retryConfig !== undefined && {
+            retryConfig: JSON.stringify(updates.retryConfig),
+          }),
+          ...(updates.headers !== undefined && { headers: JSON.stringify(updates.headers) }),
+        },
+      })
+    } catch {
+      // Record may not exist in DB (e.g. env-loaded endpoint)
+    }
+
+    logger.info('Webhook endpoint updated', { endpointId: id })
+    return true
+  }
+
+  /**
+   * Update webhook endpoint (in-memory only)
    */
   updateEndpoint(id: string, updates: Partial<WebhookEndpoint>): boolean {
     const endpoint = this.endpoints.get(id)
     if (!endpoint) return false
-
     this.endpoints.set(id, { ...endpoint, ...updates })
-    logger.info('Webhook endpoint updated', {
-      endpointId: id,
-      updates,
-    })
+    logger.info('Webhook endpoint updated (in-memory)', { endpointId: id })
     return true
   }
 
@@ -163,15 +197,10 @@ export class WebhookService {
       metadata,
     }
 
-    logger.info('Webhook event queued', {
-      event,
-      webhookId: payload.id,
-      metadata,
-    })
+    logger.info('Webhook event queued', { event, webhookId: payload.id, metadata })
 
     this.deliveryQueue.push(payload)
 
-    // Process queue if not already processing
     if (!this.isProcessing) {
       await this.processQueue()
     }
@@ -181,16 +210,13 @@ export class WebhookService {
    * Process webhook delivery queue
    */
   private async processQueue(): Promise<void> {
-    if (this.isProcessing || this.deliveryQueue.length === 0) {
-      return
-    }
+    if (this.isProcessing || this.deliveryQueue.length === 0) return
 
     this.isProcessing = true
 
     while (this.deliveryQueue.length > 0) {
       const payload = this.deliveryQueue.shift()
       if (!payload) continue
-
       await this.deliverPayload(payload)
     }
 
@@ -210,30 +236,28 @@ export class WebhookService {
       return
     }
 
-    const deliveryPromises = subscribedEndpoints.map((endpoint) =>
-      this.deliverToEndpoint(endpoint, payload)
+    await Promise.allSettled(
+      subscribedEndpoints.map((endpoint) => this.deliverToEndpoint(endpoint, payload))
     )
-
-    await Promise.allSettled(deliveryPromises)
   }
 
   /**
-   * Deliver payload to a specific endpoint with retry logic
+   * Deliver payload to a specific endpoint with retry logic.
+   * Exposed as public so callers (e.g. test endpoint) can target a single endpoint directly.
    */
-  private async deliverToEndpoint(
+  async deliverToEndpoint(
     endpoint: WebhookEndpoint,
     payload: WebhookPayload,
     attempt: number = 1
   ): Promise<WebhookDeliveryResult> {
-    const maxRetries = endpoint.retryConfig?.maxRetries || 3
-    const retryDelay = endpoint.retryConfig?.retryDelay || 1000
+    const maxRetries = endpoint.retryConfig?.maxRetries ?? 3
+    const retryDelay = endpoint.retryConfig?.retryDelay ?? 1000
+    const startTime = Date.now()
 
     try {
-      // Generate signature for payload verification
       const signature = this.generateSignature(payload, endpoint.secret)
 
-      // Prepare headers
-      const headers = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-Webhook-Signature': signature,
         'X-Webhook-Event': payload.event,
@@ -243,13 +267,14 @@ export class WebhookService {
         ...endpoint.headers,
       }
 
-      // Send webhook
       const response = await fetch(endpoint.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10000), // 10 second timeout
+        signal: AbortSignal.timeout(10000),
       })
+
+      const duration = Date.now() - startTime
 
       if (response.ok) {
         logger.info('Webhook delivered successfully', {
@@ -258,6 +283,14 @@ export class WebhookService {
           statusCode: response.status,
           attempt,
         })
+
+        await this.logDelivery(endpoint.id, payload, {
+          success: true,
+          statusCode: response.status,
+          attempts: attempt,
+          duration,
+        })
+
         return {
           success: true,
           statusCode: response.status,
@@ -266,25 +299,30 @@ export class WebhookService {
         }
       }
 
-      // Non-2xx response
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const duration = Date.now() - startTime
 
       logger.error('Webhook delivery failed', {
         endpointId: endpoint.id,
         event: payload.event,
         attempt,
         maxRetries,
-        error,
         errorMessage,
       })
 
-      // Retry logic
       if (attempt < maxRetries) {
-        await this.sleep(retryDelay * attempt) // Exponential backoff
+        await this.sleep(retryDelay * attempt)
         return this.deliverToEndpoint(endpoint, payload, attempt + 1)
       }
+
+      await this.logDelivery(endpoint.id, payload, {
+        success: false,
+        error: errorMessage,
+        attempts: attempt,
+        duration,
+      })
 
       return {
         success: false,
@@ -296,55 +334,100 @@ export class WebhookService {
   }
 
   /**
-   * Generate HMAC signature for webhook payload
+   * Persist a delivery log entry to the database
    */
-  private generateSignature(payload: WebhookPayload, secret: string): string {
-    const payloadString = JSON.stringify(payload)
-    return crypto.createHmac('sha256', secret).update(payloadString).digest('hex')
+  private async logDelivery(
+    subscriptionId: string,
+    payload: WebhookPayload,
+    result: { success: boolean; statusCode?: number; error?: string; attempts: number; duration?: number }
+  ): Promise<void> {
+    try {
+      await prisma.webhookDeliveryLog.create({
+        data: {
+          subscriptionId,
+          eventType: payload.event,
+          eventId: payload.id,
+          payload: JSON.stringify(payload),
+          statusCode: result.statusCode ?? null,
+          success: result.success,
+          attempts: result.attempts,
+          error: result.error ?? null,
+          duration: result.duration ?? null,
+        },
+      })
+    } catch (err) {
+      // Non-fatal — don't let logging failures break delivery
+      logger.warn('Failed to persist webhook delivery log', { err })
+    }
   }
 
   /**
-   * Verify webhook signature
+   * Generate HMAC-SHA256 signature for a webhook payload
+   */
+  private generateSignature(payload: WebhookPayload, secret: string): string {
+    return crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex')
+  }
+
+  /**
+   * Verify webhook signature (timing-safe)
    */
   verifySignature(payload: WebhookPayload, signature: string, secret: string): boolean {
     const expectedSignature = this.generateSignature(payload, secret)
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
+    const sigBuf = Buffer.from(signature)
+    const expectedBuf = Buffer.from(expectedSignature)
+    // timingSafeEqual requires equal-length buffers
+    if (sigBuf.length !== expectedBuf.length) return false
+    return crypto.timingSafeEqual(sigBuf, expectedBuf)
   }
 
   /**
-   * Load webhook endpoints from configuration
+   * Load persisted webhook endpoints from the database into the in-memory cache,
+   * then supplement with any endpoints configured via environment variables.
    */
-  private loadEndpoints(): void {
-    // Load from environment variables
-    const webhookUrls = process.env.WEBHOOK_URLS?.split(',') || []
-    const webhookSecrets = process.env.WEBHOOK_SECRETS?.split(',') || []
+  private async loadEndpoints(): Promise<void> {
+    const records = await prisma.webhookSubscription.findMany({ where: { enabled: true } })
 
-    webhookUrls.forEach((url, index) => {
-      if (url.trim()) {
+    for (const record of records) {
+      const endpoint: WebhookEndpoint = {
+        id: record.id,
+        url: record.url,
+        secret: record.secret,
+        events: JSON.parse(record.events) as WebhookEventType[],
+        enabled: record.enabled,
+        retryConfig: record.retryConfig
+          ? JSON.parse(record.retryConfig)
+          : { maxRetries: 3, retryDelay: 1000 },
+        headers: record.headers ? JSON.parse(record.headers) : undefined,
+      }
+      this.endpoints.set(record.id, endpoint)
+    }
+
+    logger.info('Webhook endpoints loaded from database', { count: records.length })
+
+    // Also load from environment variables (in-memory only, not persisted)
+    const webhookUrls = process.env.WEBHOOK_URLS?.split(',') ?? []
+    const webhookSecrets = process.env.WEBHOOK_SECRETS?.split(',') ?? []
+
+    for (let i = 0; i < webhookUrls.length; i++) {
+      const url = webhookUrls[i]?.trim()
+      if (url) {
         this.registerEndpoint({
-          url: url.trim(),
-          secret: webhookSecrets[index]?.trim() || this.generateSecret(),
+          url,
+          secret: webhookSecrets[i]?.trim() || this.generateSecret(),
           events: Object.values(WebhookEventType),
           enabled: true,
         })
       }
-    })
-
-    logger.info('Webhook endpoints loaded from environment', {
-      configuredEndpoints: webhookUrls.filter((url) => url.trim()).length,
-    })
+    }
   }
 
   /**
-   * Generate a secure webhook secret
+   * Generate a cryptographically secure webhook secret
    */
   private generateSecret(): string {
     return crypto.randomBytes(32).toString('hex')
   }
 
-  /**
-   * Sleep utility for retry delays
-   */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
@@ -352,11 +435,7 @@ export class WebhookService {
   /**
    * Get webhook statistics
    */
-  getStats(): {
-    totalEndpoints: number
-    activeEndpoints: number
-    queuedEvents: number
-  } {
+  getStats(): { totalEndpoints: number; activeEndpoints: number; queuedEvents: number } {
     return {
       totalEndpoints: this.endpoints.size,
       activeEndpoints: Array.from(this.endpoints.values()).filter((e) => e.enabled).length,
