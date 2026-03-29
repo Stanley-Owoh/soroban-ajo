@@ -22,6 +22,23 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).optional(),
   JWT_EXPIRES_IN: z.string().default('7d'),
 
+  // Database
+  DATABASE_URL: z.string().url().optional(),
+
+  // Redis
+  REDIS_URL: z.string().url().optional(),
+
+  // Rate Limiting
+  RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('900000'),
+  RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('100'),
+
+  // Email (SendGrid)
+  SENDGRID_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().email().optional(),
+
+  // Sentry (optional)
+  SENTRY_DSN: z.string().url().optional(),
+
   // Webhook Configuration
   WEBHOOK_URLS: z.string().optional(),
   WEBHOOK_SECRETS: z.string().optional(),
@@ -73,7 +90,22 @@ export const authConfig = {
   jwtExpiresIn: config.JWT_EXPIRES_IN,
 } as const
 
+export const dbConfig = {
+  databaseUrl: config.DATABASE_URL,
+  redisUrl: config.REDIS_URL,
+} as const
+
+export const rateLimitConfig = {
+  windowMs: config.RATE_LIMIT_WINDOW_MS,
+  maxRequests: config.RATE_LIMIT_MAX_REQUESTS,
+} as const
+
+export const emailConfig = {
+  sendgridApiKey: config.SENDGRID_API_KEY,
+  from: config.EMAIL_FROM,
+} as const
+
 export const webhookConfig = {
-  urls: config.WEBHOOK_URLS?.split(',').filter(Boolean) || [],
-  secrets: config.WEBHOOK_SECRETS?.split(',').filter(Boolean) || [],
+  urls: config.WEBHOOK_URLS?.split(',').filter(Boolean) ?? [],
+  secrets: config.WEBHOOK_SECRETS?.split(',').filter(Boolean) ?? [],
 } as const

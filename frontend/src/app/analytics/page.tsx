@@ -1,13 +1,29 @@
 'use client';
 
 import { useGroupAnalytics } from '@/hooks/useGroupAnalytics';
-import {
-  AnalyticsSummaryCards,
-  ContributionTrendChart,
-  GroupPerformanceChart,
-  MemberGrowthChart,
-  TopContributorsTable,
-} from '@/components/analytics';
+import { SkeletonChart } from '@/components/skeletons';
+import { lazyLoad } from '@/utils/lazyLoad';
+
+const AnalyticsSummaryCards = lazyLoad(
+  () => import('@/components/analytics').then((m) => ({ default: m.AnalyticsSummaryCards })),
+  { loading: () => <SkeletonChart /> }
+);
+const ContributionTrendChart = lazyLoad(
+  () => import('@/components/analytics').then((m) => ({ default: m.ContributionTrendChart })),
+  { loading: () => <SkeletonChart /> }
+);
+const GroupPerformanceChart = lazyLoad(
+  () => import('@/components/analytics').then((m) => ({ default: m.GroupPerformanceChart })),
+  { loading: () => <SkeletonChart /> }
+);
+const MemberGrowthChart = lazyLoad(
+  () => import('@/components/analytics').then((m) => ({ default: m.MemberGrowthChart })),
+  { loading: () => <SkeletonChart /> }
+);
+const TopContributorsTable = lazyLoad(
+  () => import('@/components/analytics').then((m) => ({ default: m.TopContributorsTable })),
+  { loading: () => <SkeletonChart /> }
+);
 
 /**
  * Analytics Dashboard

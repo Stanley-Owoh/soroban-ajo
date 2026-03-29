@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
     kycLevel?: number
     isAdmin?: boolean
   }
-  body: any
+  body: Record<string, unknown>
 }
 
 /**
@@ -34,5 +34,5 @@ export interface KYCData {
   level: number
   verified: boolean
   expiresAt?: Date
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }

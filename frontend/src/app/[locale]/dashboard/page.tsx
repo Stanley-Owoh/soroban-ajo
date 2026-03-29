@@ -2,9 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { GamificationDashboard } from '@/components/GamificationDashboard'
-import { GroupCard } from '@/components/GroupCard'
+import { SkeletonCard } from '@/components/skeletons'
+import { lazyLoad } from '@/utils/lazyLoad'
 import { useAuthContext } from '@/context/AuthContext'
+
+const GamificationDashboard = lazyLoad(
+  () => import('@/components/GamificationDashboard').then((m) => ({ default: m.GamificationDashboard })),
+  { loading: () => <SkeletonCard /> }
+)
+const GroupCard = lazyLoad(
+  () => import('@/components/GroupCard').then((m) => ({ default: m.GroupCard })),
+  { loading: () => <SkeletonCard /> }
+)
 
 export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)

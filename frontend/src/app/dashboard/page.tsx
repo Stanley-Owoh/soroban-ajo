@@ -7,10 +7,22 @@ import { useAuth } from '@/hooks/useAuth'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useStaggeredAnimation } from '@/hooks/useStaggeredAnimation'
 import { BentoGrid, BentoCell } from '@/components/BentoGrid'
-import { GamificationDashboard } from '@/components/GamificationDashboard'
 import { MetricCard } from '@/components/dashboard/MetricCard'
-import { GroupsGrid } from '@/components/GroupsGrid'
-import { GroupsList } from '@/components/GroupsList'
+import { SkeletonCard } from '@/components/skeletons'
+import { lazyLoad } from '@/utils/lazyLoad'
+
+const GamificationDashboard = lazyLoad(
+  () => import('@/components/GamificationDashboard').then((m) => ({ default: m.GamificationDashboard })),
+  { loading: () => <SkeletonCard /> }
+)
+const GroupsGrid = lazyLoad(
+  () => import('@/components/GroupsGrid').then((m) => ({ default: m.GroupsGrid })),
+  { loading: () => <SkeletonCard /> }
+)
+const GroupsList = lazyLoad(
+  () => import('@/components/GroupsList').then((m) => ({ default: m.GroupsList })),
+  { loading: () => <SkeletonCard /> }
+)
 
 export default function DashboardPage() {
   const router = useRouter()

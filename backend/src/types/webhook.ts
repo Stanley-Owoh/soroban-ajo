@@ -6,7 +6,7 @@ export interface WebhookEvent {
   id: string
   event: string
   timestamp: string
-  data: Record<string, any>
+  data: Record<string, unknown>
   metadata?: {
     groupId?: string
     userId?: string

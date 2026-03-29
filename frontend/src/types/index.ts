@@ -98,8 +98,8 @@ export interface SorobanTransactionResponse {
 }
 
 export interface ContractInvocationResult {
-  returnValue: any
-  simulatedFootprint: any
+  returnValue: unknown
+  simulatedFootprint: unknown
 }
 
 // Re-export profile types
