@@ -70,5 +70,20 @@ export const navLinks = [
         </svg>
       ),
     },
+    {
+      href: '/leaderboard',
+      label: 'Leaderboard',
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          fill="currentColor"
+          className="bi bi-trophy"
+          viewBox="0 0 16 16"
+        >
+          <path d="M2 1a1 1 0 0 0-1 1v2a3 3 0 0 0 2.945 3A4 4 0 0 0 7 9.874V11H5.5a.5.5 0 0 0 0 1h.5v1h-1a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1h-1v-1h.5a.5.5 0 0 0 0-1H9V9.874A4 4 0 0 0 12.055 7 3 3 0 0 0 15 4V2a1 1 0 0 0-1-1zM2 2h2v4.088A2 2 0 0 1 2 4zm11 0v2a2 2 0 0 1-2 2.088V2zM8 9a3 3 0 0 1-3-3V2h6v4a3 3 0 0 1-3 3m1 4H7v-1h2z" />
+        </svg>
+      ),
+    },
   ]
-  
