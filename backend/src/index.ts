@@ -54,21 +54,9 @@ app.use('/api/jobs', jobsRouter)
 import { disputesRouter } from './routes/disputes'
 app.use('/api/disputes', disputesRouter)
 
-// ML Fraud Detection
-import { fraudRouter } from './routes/fraud'
-app.use('/api/fraud', fraudRouter)
-
-// GDPR Compliance
-import { gdprRouter } from './routes/gdpr'
-app.use('/api/gdpr', gdprRouter)
-
-// Security Audit Logging
-import { securityRouter } from './routes/security'
-app.use('/api/security', securityRouter)
-
-// Stellar DEX Integration
-import { dexRouter } from './routes/dex'
-app.use('/api/dex', dexRouter)
+// Templates
+import { templatesRouter } from './routes/templates'
+app.use('/api/templates', templatesRouter)
 
 // 404 handler
 app.use((req, res) => {
