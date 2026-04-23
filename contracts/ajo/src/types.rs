@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Vec};
 
 /// Strategy for determining payout order in a group.
 #[contracttype]
@@ -378,12 +378,6 @@ pub enum RefundReason {
     /// Dispute resolution refund.
     DisputeRefund = 3,
 }
-
-/// Voting period duration in seconds (7 days).
-pub const VOTING_PERIOD: u64 = 604_800;
-
-/// Minimum approval percentage required for refund (51%).
-pub const REFUND_APPROVAL_THRESHOLD: u32 = 51;
 
 /// Detailed record of a member's contribution for a specific cycle.
 #[contracttype]
