@@ -6,7 +6,8 @@ use crate::pausable;
 use crate::storage;
 use crate::types::{
     AchievementRecord, Group, GroupAccessType, GroupMetadata, GroupStatus, MemberStats,
-    MilestoneRecord, PayoutOrderingStrategy,
+    MilestoneRecord, PayoutOrderingStrategy, ReputationScore, CreditScoreSnapshot,
+    PaymentHistoryEntry,
 };
 use crate::utils;
 
@@ -480,6 +481,18 @@ impl AjoContract {
             events::emit_achievement_earned(&env, &member, record.achievement as u32, group_id_cached);
         }
 
+        // Record payment history entry and update on-chain reputation
+        crate::reputation::record_payment_event(
+            &env,
+            &member,
+            group_id_cached,
+            current_cycle,
+            contribution_amount,
+            false, // on-time contribution
+            false,
+        );
+        let _ = crate::reputation::update_member_reputation(&env, &member);
+
         Ok(())
     }
 
@@ -680,8 +693,22 @@ impl AjoContract {
                     .unwrap_or_else(|| utils::default_member_stats(&env, &member));
                 stats.total_groups_completed += 1;
                 storage::store_member_stats(&env, &member, &stats);
+                // Refresh reputation for every member on group completion
+                let _ = crate::reputation::update_member_reputation(&env, &member);
             }
         }
+
+        // Record payout receipt in payment history and refresh recipient reputation
+        crate::reputation::record_payment_event(
+            &env,
+            &payout_recipient,
+            group_id_cached,
+            current_cycle,
+            payout_amount,
+            false,
+            true, // is_payout
+        );
+        let _ = crate::reputation::update_member_reputation(&env, &payout_recipient);
 
         Ok(())
     }
@@ -2557,4 +2584,121 @@ pub fn get_refund_record(
         templates.push_back(crate::types::GroupTemplate::Custom);
         templates
     }
+
+    // ── Reputation system ─────────────────────────────────────────────────────
+
+    /// Get the full on-chain reputation record for a member.
+    ///
+    /// Returns the stored [`ReputationScore`] if one exists, or a default
+    /// zero-score record for members who have not yet built any history.
+    /// This is a pure read — it never modifies state.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban contract environment
+    /// * `member` - The member's Stellar address
+    ///
+    /// # Returns
+    /// The member's current [`ReputationScore`]
+    pub fn get_reputation(env: Env, member: Address) -> crate::types::ReputationScore {
+        crate::reputation::get_reputation(&env, &member)
+    }
+
+    /// Get the current credit score for a member (0–1000).
+    ///
+    /// Convenience wrapper around [`get_reputation`] that returns only the
+    /// numeric score.  Returns 0 for members with no history.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban contract environment
+    /// * `member` - The member's Stellar address
+    pub fn get_credit_score(env: Env, member: Address) -> u32 {
+        crate::reputation::get_reputation(&env, &member).credit_score
+    }
+
+    /// Get the payment history for a member.
+    ///
+    /// Returns an ordered list of [`PaymentHistoryEntry`] records covering
+    /// both contributions made and payouts received.  The list is capped at
+    /// [`MAX_PAYMENT_HISTORY`](crate::types::MAX_PAYMENT_HISTORY) entries
+    /// (oldest entries are dropped when the cap is reached).
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban contract environment
+    /// * `member` - The member's Stellar address
+    ///
+    /// # Returns
+    /// Vector of payment history entries, oldest first
+    pub fn get_payment_history(
+        env: Env,
+        member: Address,
+    ) -> soroban_sdk::Vec<crate::types::PaymentHistoryEntry> {
+        crate::reputation::get_payment_history(&env, &member)
+    }
+
+    /// Get the credit score snapshot history for a member.
+    ///
+    /// Returns an ordered list of [`CreditScoreSnapshot`] records showing
+    /// how the member's score has changed over time.  Capped at
+    /// [`MAX_SCORE_HISTORY`](crate::types::MAX_SCORE_HISTORY) entries.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban contract environment
+    /// * `member` - The member's Stellar address
+    ///
+    /// # Returns
+    /// Vector of score snapshots, oldest first
+    pub fn get_credit_score_history(
+        env: Env,
+        member: Address,
+    ) -> soroban_sdk::Vec<crate::types::CreditScoreSnapshot> {
+        crate::reputation::get_credit_score_history(&env, &member)
+    }
+
+    /// Manually trigger a reputation recalculation for a member.
+    ///
+    /// Reputation is updated automatically on every contribution and payout,
+    /// but this function allows an explicit refresh — useful after admin
+    /// corrections or data migrations.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban contract environment
+    /// * `caller` - The address requesting the refresh (must authenticate)
+    /// * `member` - The member whose reputation should be recalculated
+    ///
+    /// # Returns
+    /// The freshly computed [`ReputationScore`]
+    ///
+    /// # Errors
+    /// * `ContractPaused` - If the contract is paused
+    pub fn refresh_reputation(
+        env: Env,
+        caller: Address,
+        member: Address,
+    ) -> Result<crate::types::ReputationScore, AjoError> {
+        pausable::ensure_not_paused(&env)?;
+        caller.require_auth();
+        crate::reputation::update_member_reputation(&env, &member)
+    }
+
+    /// Check whether a member meets a minimum credit score requirement.
+    ///
+    /// Returns `Ok(())` if the member's score is at or above `min_score`,
+    /// or if `min_score` is 0 (no requirement).  Useful for group creators
+    /// who want to gate membership on reputation.
+    ///
+    /// # Arguments
+    /// * `env`       - The Soroban contract environment
+    /// * `member`    - The member to check
+    /// * `min_score` - Minimum required credit score (0 = no requirement)
+    ///
+    /// # Errors
+    /// * `InsufficientCreditScore` - If the member's score is below `min_score`
+    pub fn check_credit_requirement(
+        env: Env,
+        member: Address,
+        min_score: u32,
+    ) -> Result<(), AjoError> {
+        crate::reputation::check_credit_requirement(&env, &member, min_score)
+    }
 }
+

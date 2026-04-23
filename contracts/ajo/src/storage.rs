@@ -68,6 +68,18 @@ pub enum StorageKey {
     /// Aggregated member statistics.
     /// Stored in persistent storage under `("MSTATS", member)`.
     MemberStatsData(Address),
+
+    /// Aggregated reputation record for a member.
+    /// Stored in persistent storage under `("MREP", member)`.
+    MemberReputation(Address),
+
+    /// Ordered list of credit score snapshots for a member.
+    /// Stored in persistent storage under `("MREPSNAP", member)`.
+    MemberReputationSnapshots(Address),
+
+    /// Ordered list of payment history entries for a member.
+    /// Stored in persistent storage under `("MPAYHIST", member)`.
+    MemberPaymentHistory(Address),
 }
 
 impl StorageKey {
@@ -99,6 +111,9 @@ impl StorageKey {
             StorageKey::GroupMilestones(_) => symbol_short!("GMILE"),
             StorageKey::MemberAchievements(_) => symbol_short!("MACHIEV"),
             StorageKey::MemberStatsData(_) => symbol_short!("MSTATS"),
+            StorageKey::MemberReputation(_) => symbol_short!("MREP"),
+            StorageKey::MemberReputationSnapshots(_) => symbol_short!("MREPSNAP"),
+            StorageKey::MemberPaymentHistory(_) => symbol_short!("MPAYHIST"),
         }
     }
 }
@@ -905,4 +920,78 @@ pub fn store_group_dispute_ids(env: &Env, group_id: u64, ids: &Vec<u64>) {
 pub fn get_group_dispute_ids(env: &Env, group_id: u64) -> Vec<u64> {
     let key = (symbol_short!("DISPGIDS"), group_id);
     env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env))
+}
+
+// ── Reputation storage ────────────────────────────────────────────────────
+
+/// Stores the aggregated reputation record for a member.
+pub fn store_reputation(env: &Env, member: &Address, rep: &crate::types::ReputationScore) {
+    let key = (symbol_short!("MREP"), member);
+    env.storage().persistent().set(&key, rep);
+}
+
+/// Retrieves the aggregated reputation record for a member.
+pub fn get_reputation(env: &Env, member: &Address) -> Option<crate::types::ReputationScore> {
+    let key = (symbol_short!("MREP"), member);
+    env.storage().persistent().get(&key)
+}
+
+/// Appends a credit score snapshot to the member's history.
+///
+/// Enforces a rolling cap of [`MAX_SCORE_HISTORY`](crate::types::MAX_SCORE_HISTORY)
+/// entries by dropping the oldest entry when the cap is reached.
+pub fn append_credit_snapshot(
+    env: &Env,
+    member: &Address,
+    snapshot: &crate::types::CreditScoreSnapshot,
+) {
+    let key = (symbol_short!("MREPSNAP"), member);
+    let mut history: Vec<crate::types::CreditScoreSnapshot> =
+        env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+
+    // Enforce rolling cap
+    while history.len() >= crate::types::MAX_SCORE_HISTORY {
+        history.remove(0);
+    }
+    history.push_back(snapshot.clone());
+    env.storage().persistent().set(&key, &history);
+}
+
+/// Retrieves the credit score snapshot history for a member.
+pub fn get_credit_snapshots(
+    env: &Env,
+    member: &Address,
+) -> Option<Vec<crate::types::CreditScoreSnapshot>> {
+    let key = (symbol_short!("MREPSNAP"), member);
+    env.storage().persistent().get(&key)
+}
+
+/// Appends a payment history entry for a member.
+///
+/// Enforces a rolling cap of [`MAX_PAYMENT_HISTORY`](crate::types::MAX_PAYMENT_HISTORY)
+/// entries by dropping the oldest entry when the cap is reached.
+pub fn append_payment_history(
+    env: &Env,
+    member: &Address,
+    entry: &crate::types::PaymentHistoryEntry,
+) {
+    let key = (symbol_short!("MPAYHIST"), member);
+    let mut history: Vec<crate::types::PaymentHistoryEntry> =
+        env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+
+    // Enforce rolling cap
+    while history.len() >= crate::types::MAX_PAYMENT_HISTORY {
+        history.remove(0);
+    }
+    history.push_back(entry.clone());
+    env.storage().persistent().set(&key, &history);
+}
+
+/// Retrieves the payment history for a member.
+pub fn get_payment_history(
+    env: &Env,
+    member: &Address,
+) -> Option<Vec<crate::types::PaymentHistoryEntry>> {
+    let key = (symbol_short!("MPAYHIST"), member);
+    env.storage().persistent().get(&key)
 }
