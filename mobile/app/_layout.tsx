@@ -1,20 +1,46 @@
-import React, { useEffect } from 'react';
-import { View } from 'react-native';
+import React, { useEffect, useCallback } from 'react';
+import { View, Linking as RNLinking } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuthStore } from '../src/store/authStore';
 import { OfflineBanner } from '../src/components/OfflineBanner';
+import { parseWalletCallback } from '../src/services/walletConnectService';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { initialize, isLoading } = useAuthStore();
+  const { initialize, isLoading, login } = useAuthStore();
+
+  const handleDeepLink = useCallback((event: { url: string }) => {
+    const result = parseWalletCallback(event.url);
+    if (result) {
+      // Assuming login method accepts the public key and network
+      login({
+        address: result.publicKey,
+        network: result.network,
+        provider: 'lobstr' // or logic to determine provider
+      });
+    }
+  }, [login]);
 
   useEffect(() => {
     initialize().finally(() => SplashScreen.hideAsync());
-  }, []);
+
+    // Set up deep link listener
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check for initial URL if app was opened via deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [initialize, handleDeepLink]);
 
   if (isLoading) return null;
 
