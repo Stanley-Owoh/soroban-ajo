@@ -16,12 +16,15 @@ mod contract;
 mod errors;
 mod events;
 mod pausable;
+mod reputation;
 mod security;
 mod storage;
 mod token;
 mod types;
 mod utils;
 mod insurance;
+mod loan;
+mod emergency;
 
 pub use contract::AjoContract;
 pub use contract::AjoContractClient;
@@ -33,3 +36,6 @@ pub use types::{GroupMilestone, MemberAchievement, MilestoneRecord, AchievementR
 pub use types::{TokenConfig, MultiTokenConfig, TokenContribution};
 pub use types::{Dispute, DisputeType, DisputeStatus, DisputeResolution, DisputeVote};
 pub use types::{GroupTemplate, TemplateConfig};
+pub use types::{
+    ReputationScore, ReputationTier, CreditScoreSnapshot, PaymentHistoryEntry, ScoreChangeReason,
+};

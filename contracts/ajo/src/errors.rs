@@ -177,5 +177,13 @@ pub enum AjoError {
 
     /// The caller is not a member of the dispute's group.
     NotDisputeMember = 56,
+
+    // ── Reputation errors ─────────────────────────────────────────────────
+
+    /// No reputation record found for this member.
+    ReputationNotFound = 57,
+
+    /// Member's credit score is below the group's minimum requirement.
+    InsufficientCreditScore = 58,
 }
 

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuthStore } from '../src/store/authStore';
 import { useBiometrics } from '../src/hooks/useBiometrics';
@@ -68,7 +69,19 @@ export default function RootLayout() {
 
   useEffect(() => {
     initialize().finally(() => SplashScreen.hideAsync());
-  }, []);
+
+    // Set up deep link listener
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check for initial URL if app was opened via deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink({ url });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [initialize, handleDeepLink]);
 
   if (isLoading) return null;
 

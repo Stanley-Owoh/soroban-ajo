@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import { Toaster } from 'react-hot-toast'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { NotificationProvider } from '@/components/NotificationProvider'
 
 function OnboardingInitializer() {
   const startOnboardingIfNew = useOnboarding((s) => s.startOnboardingIfNew)
@@ -52,11 +53,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <OfflineProvider>
+          <NotificationProvider>
             <OnboardingInitializer />
             {children}
             <Toaster position="top-right" />
-          </OfflineProvider>
+          </NotificationProvider>
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

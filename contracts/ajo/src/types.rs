@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Vec};
 
 /// Strategy for determining payout order in a group.
 #[contracttype]
@@ -379,12 +379,6 @@ pub enum RefundReason {
     DisputeRefund = 3,
 }
 
-/// Voting period duration in seconds (7 days).
-pub const VOTING_PERIOD: u64 = 604_800;
-
-/// Minimum approval percentage required for refund (51%).
-pub const REFUND_APPROVAL_THRESHOLD: u32 = 51;
-
 /// Detailed record of a member's contribution for a specific cycle.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -709,3 +703,128 @@ pub struct TemplateConfig {
     /// Suggested maximum number of members.
     pub suggested_max_members: u32,
 }
+
+// ── Reputation system ─────────────────────────────────────────────────────
+
+/// Reputation tier derived from a member's credit score.
+///
+/// Tiers are used for access control (e.g. InviteOnly groups can require
+/// a minimum tier) and for UI display purposes.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ReputationTier {
+    /// No contribution history yet (score 0–199).
+    Unrated = 0,
+    /// Beginner member with limited history (score 200–399).
+    Bronze = 1,
+    /// Established member with decent track record (score 400–599).
+    Silver = 2,
+    /// Reliable member with strong history (score 600–799).
+    Gold = 3,
+    /// Highly trusted member (score 800–899).
+    Platinum = 4,
+    /// Elite member with near-perfect record (score 900–1000).
+    Diamond = 5,
+}
+
+/// Reason a credit score snapshot was recorded.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ScoreChangeReason {
+    /// Score recalculated after a contribution was made.
+    ContributionMade = 0,
+    /// Score recalculated after a payout was received.
+    PayoutReceived = 1,
+    /// Score recalculated after a group was completed.
+    GroupCompleted = 2,
+    /// Score recalculated after a late contribution.
+    LateContribution = 3,
+    /// Score recalculated after a penalty was applied.
+    PenaltyApplied = 4,
+}
+
+/// Aggregated on-chain reputation record for a member.
+///
+/// Stored in persistent storage keyed by member address.
+/// Updated automatically after every contribution, payout, and group completion.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationScore {
+    /// The member this record belongs to.
+    pub member: Address,
+
+    /// Composite credit score in the range 0–1000.
+    /// Higher is better.
+    pub credit_score: u32,
+
+    /// Derived tier based on `credit_score`.
+    pub tier: ReputationTier,
+
+    /// Total number of on-time contributions across all groups.
+    pub total_on_time_payments: u32,
+
+    /// Total number of late contributions (within grace period).
+    pub total_late_payments: u32,
+
+    /// Total number of missed contributions (past grace period, future use).
+    pub total_missed_payments: u32,
+
+    /// Number of groups the member has fully completed.
+    pub groups_completed: u32,
+
+    /// Number of groups the member has ever joined.
+    pub groups_joined: u32,
+
+    /// Cumulative amount contributed across all groups (in stroops).
+    pub total_amount_contributed: i128,
+
+    /// Unix timestamp of the last reputation update.
+    pub last_updated: u64,
+
+    /// Unix timestamp of the member's first recorded activity.
+    pub first_activity_at: u64,
+}
+
+/// A point-in-time snapshot of a member's credit score.
+///
+/// Appended to the member's score history on every recalculation.
+/// Provides an auditable trail of score changes over time.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditScoreSnapshot {
+    /// The credit score at the time of this snapshot.
+    pub score: u32,
+    /// Unix timestamp when this snapshot was recorded.
+    pub recorded_at: u64,
+    /// The event that triggered this recalculation.
+    pub reason: ScoreChangeReason,
+}
+
+/// A single entry in a member's payment history.
+///
+/// Recorded for every contribution and payout event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentHistoryEntry {
+    /// The group this payment belongs to.
+    pub group_id: u64,
+    /// The cycle number this payment was made in.
+    pub cycle: u32,
+    /// Amount in stroops (contribution or payout).
+    pub amount: i128,
+    /// Unix timestamp of the payment.
+    pub timestamp: u64,
+    /// Whether this contribution was made after the cycle deadline (late).
+    pub is_late: bool,
+    /// Whether this entry records a payout received (vs. a contribution made).
+    pub is_payout: bool,
+}
+
+/// Maximum number of credit score snapshots retained per member.
+/// Older entries are dropped when the cap is reached (FIFO).
+pub const MAX_SCORE_HISTORY: u32 = 50;
+
+/// Maximum number of payment history entries retained per member.
+pub const MAX_PAYMENT_HISTORY: u32 = 100;

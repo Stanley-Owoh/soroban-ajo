@@ -264,3 +264,30 @@ pub fn emit_dispute_resolved(
     let topics = (symbol_short!("disres"), dispute_id);
     env.events().publish(topics, (group_id, resolution));
 }
+
+// ── Reputation events ─────────────────────────────────────────────────────
+
+/// Emit an event when a member's reputation record is updated.
+///
+/// `tier` is the numeric value of the new [`ReputationTier`](crate::types::ReputationTier).
+pub fn emit_reputation_updated(env: &Env, member: &Address, credit_score: u32, tier: u32) {
+    let topics = (symbol_short!("repupd"),);
+    env.events().publish(topics, (member, credit_score, tier));
+}
+
+/// Emit an event when a member's credit score changes.
+pub fn emit_credit_score_changed(
+    env: &Env,
+    member: &Address,
+    old_score: u32,
+    new_score: u32,
+) {
+    let topics = (symbol_short!("scoreChg"),);
+    env.events().publish(topics, (member, old_score, new_score));
+}
+
+/// Emit an event when a member advances to a higher reputation tier.
+pub fn emit_tier_upgraded(env: &Env, member: &Address, old_tier: u32, new_tier: u32) {
+    let topics = (symbol_short!("tierUp"),);
+    env.events().publish(topics, (member, old_tier, new_tier));
+}

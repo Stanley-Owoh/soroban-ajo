@@ -2,7 +2,9 @@ import * as cron from 'node-cron'
 import { createQueue, getQueue } from '../queues/queueManager'
 import { SYNC_QUEUE_NAME } from '../queues/syncQueue'
 import { REMINDER_QUEUE_NAME } from '../jobs/workers'
+import { addScheduleJob } from '../queues/scheduleQueue'
 import { logger } from '../utils/logger'
+import { backupService } from '../services/backupService'
 
 const ANALYTICS_QUEUE_NAME = 'analytics'
 
@@ -23,6 +25,18 @@ function getAnalyticsQueue() {
 export function startScheduler(): void {
   logger.info('Starting cron scheduler...')
 
+  // Automated payout scheduling - every 15 minutes
+  scheduledTasks.push(
+    cron.schedule('*/15 * * * *', async () => {
+      logger.info('Cron: processing due payouts')
+      const { processDuePayouts } = await import('../services/payoutSchedulerService')
+      const result = await processDuePayouts()
+      if (result.scheduled > 0) {
+        logger.info('Cron: payouts scheduled', result)
+      }
+    })
+  )
+
   // Blockchain sync - every 5 minutes
   scheduledTasks.push(
     cron.schedule('*/5 * * * *', async () => {
@@ -36,6 +50,22 @@ export function startScheduler(): void {
     cron.schedule('0 8 * * *', async () => {
       logger.info('Cron: scheduling daily contribution reminders')
       await getReminderQueue().add('daily-reminders', { type: 'daily_contribution' })
+    })
+  )
+
+  // Payout upcoming reminders - every 2 hours
+  scheduledTasks.push(
+    cron.schedule('0 */2 * * *', async () => {
+      logger.info('Cron: scheduling payout upcoming reminders')
+      await getReminderQueue().add('payout-reminders', { type: 'payout_upcoming' })
+    })
+  )
+
+  // Overdue contribution reminders - every 6 hours
+  scheduledTasks.push(
+    cron.schedule('0 */6 * * *', async () => {
+      logger.info('Cron: scheduling overdue reminders')
+      await getReminderQueue().add('overdue-reminders', { type: 'overdue' })
     })
   )
 
@@ -92,6 +122,24 @@ export function startScheduler(): void {
     cron.schedule('0 2 * * *', async () => {
       logger.info('Cron: scheduling database cleanup')
       await getAnalyticsQueue().add('cleanup', { type: 'cleanup' })
+    })
+  )
+
+  // ── Contribution Schedule jobs ──────────────────────────────────────────
+
+  // Grace period enforcement — every 15 minutes
+  scheduledTasks.push(
+    cron.schedule('*/15 * * * *', async () => {
+      logger.info('Cron: scheduling grace period enforcement')
+      await addScheduleJob({ type: 'enforce_grace_periods' })
+    })
+  )
+
+  // Due-date reminders — every hour (catches schedules due in the next 24 h)
+  scheduledTasks.push(
+    cron.schedule('0 * * * *', async () => {
+      logger.info('Cron: scheduling contribution due reminders')
+      await addScheduleJob({ type: 'send_due_reminders' })
     })
   )
 
