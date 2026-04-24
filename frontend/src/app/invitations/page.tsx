@@ -83,6 +83,7 @@ export default function InvitationsPage() {
     addNotification({
       id: `notification-${invitation.id}`,
       type: 'group_invitation',
+      category: 'groups',
       title: 'Invitation sent',
       message: `Invitation sent to ${draft.recipientName || draft.recipientAddress} for ${draft.groupName}.`,
       timestamp: Date.now(),
@@ -106,6 +107,7 @@ export default function InvitationsPage() {
     addNotification({
       id: `notification-${id}-${status}`,
       type: 'invitation_response',
+      category: 'members',
       title: status === 'accepted' ? 'Invitation accepted' : 'Invitation declined',
       message: createNotificationMessage(invitation, status),
       timestamp: Date.now(),
@@ -126,6 +128,7 @@ export default function InvitationsPage() {
     addNotification({
       id: `notification-${id}-revoked`,
       type: 'group_invitation',
+      category: 'groups',
       title: 'Invitation revoked',
       message: `Invitation for ${invitation.groupName} was revoked before the recipient responded.`,
       timestamp: Date.now(),
